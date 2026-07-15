@@ -44,11 +44,14 @@ public class AuthService {
             newOrg.setSizeCategory(req.getSizeCategory());
             org = orgRepo.save(newOrg);
 
-        } else if ("EMPLOYEE".equalsIgnoreCase(req.getRole()) || "LEADER".equalsIgnoreCase(req.getRole())) {
+        } else if ("EMPLOYEE".equalsIgnoreCase(req.getRole())) {
             if (req.getOrganisationId() == null)
-                throw new IllegalArgumentException("organisationId is required for EMPLOYEE / LEADER");
+                throw new IllegalArgumentException("organisationId is required for EMPLOYEE");
             org = orgRepo.findById(UUID.fromString(req.getOrganisationId()))
                     .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
+        } else if ("LEADER".equalsIgnoreCase(req.getRole())) {
+            // Leaders are independent users, not tied to any organisation.
+            org = null;
         } else {
             throw new IllegalArgumentException("role must be ORG_ADMIN, EMPLOYEE, or LEADER");
         }

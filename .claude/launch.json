@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "heail-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "D:/heail-frontend/heail-frontend", "run", "start"],
+      "port": 4200
+    }
+  ]
+}
