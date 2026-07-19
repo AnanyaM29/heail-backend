@@ -16,7 +16,11 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletResponse;
+
 import java.util.List;
+import java.util.Map;
 
 @Configuration
 @EnableWebSecurity
@@ -25,6 +29,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final ObjectMapper objectMapper;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -36,8 +41,29 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .anyRequest().authenticated()
             )
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+            // Spring Security's default handlers write Spring Boot's HTML /error page for
+            // 401/403 responses raised by @PreAuthorize or the filter chain, which the
+            // Angular frontend can't parse as JSON — it shows up client-side as a generic,
+            // unhelpful error. These two handlers make every 401/403 a real JSON body instead,
+            // written directly to the response so it bypasses BasicErrorController entirely.
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint((request, response, authException) ->
+                    writeJsonError(response, HttpServletResponse.SC_UNAUTHORIZED,
+                            "Unauthorized", "Please log in to continue."))
+                .accessDeniedHandler((request, response, accessDeniedException) ->
+                    writeJsonError(response, HttpServletResponse.SC_FORBIDDEN,
+                            "Forbidden", "You do not have access to this resource with your current account."))
+            );
         return http.build();
+    }
+
+    private void writeJsonError(HttpServletResponse response, int status, String error, String message)
+            throws java.io.IOException {
+        response.setStatus(status);
+        response.setContentType("application/json");
+        response.setCharacterEncoding("UTF-8");
+        response.getWriter().write(objectMapper.writeValueAsString(Map.of("error", error, "message", message)));
     }
 
     @Bean

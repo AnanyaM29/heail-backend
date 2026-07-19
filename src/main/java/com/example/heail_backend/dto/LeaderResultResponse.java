@@ -15,6 +15,8 @@ public class LeaderResultResponse {
     String band;
     Map<String, Integer> domainScores;
     String strongestPrinciple;
+    String strongestPrincipleText;
     String weakestPrinciple;
+    String weakestPrincipleText;
     LocalDateTime createdAt;
 }

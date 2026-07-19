@@ -1,6 +1,7 @@
 package com.example.heail_backend.repository;
 
 import com.example.heail_backend.entity.AssessmentSession;
+import com.example.heail_backend.entity.Order;
 import com.example.heail_backend.entity.SessionStatus;
 import com.example.heail_backend.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -13,4 +14,5 @@ public interface AssessmentSessionRepository extends JpaRepository<AssessmentSes
     List<AssessmentSession> findByUserAndProductCodeOrderByAttemptNumberDesc(User user, String productCode);
     Optional<AssessmentSession> findFirstByUserAndProductCodeAndStatusOrderByStartedAtDesc(
             User user, String productCode, SessionStatus status);
+    List<AssessmentSession> findByUserAndOrderAndPulse(User user, Order order, String pulse);
 }

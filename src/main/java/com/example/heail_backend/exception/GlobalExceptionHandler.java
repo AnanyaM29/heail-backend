@@ -35,6 +35,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body(message));
     }
 
+    @ExceptionHandler(EmployeeBatchValidationException.class)
+    public ResponseEntity<Map<String, Object>> handle(EmployeeBatchValidationException e) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "Validation failed");
+        body.put("message", "Validation failed");
+        body.put("rowErrors", e.getRowErrors());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, String>> handle(DataIntegrityViolationException e) {
         log.error("Data integrity violation", e);

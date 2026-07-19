@@ -56,6 +56,18 @@ public class Order {
     @Column(name = "paid_at")
     LocalDateTime paidAt;
 
+    @Column(name = "report_released_at")
+    LocalDateTime reportReleasedAt;
+
+    @Column(name = "last_non_starter_email_at")
+    LocalDateTime lastNonStarterEmailAt;
+
+    @Column(name = "last_status_email_at")
+    LocalDateTime lastStatusEmailAt;
+
+    @Column(name = "day8_email_sent_at")
+    LocalDateTime day8EmailSentAt;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     Map<String, String> metadata;

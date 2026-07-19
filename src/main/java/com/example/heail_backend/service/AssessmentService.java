@@ -235,7 +235,27 @@ public class AssessmentService {
         dto.setStrongestPrinciple(r.getStrongestPrinciple());
         dto.setWeakestPrinciple(r.getWeakestPrinciple());
         dto.setCreatedAt(r.getCreatedAt());
+
+        Map<String, String> principleTexts = principleTexts(r.getSession().getId(), r.getStrongestPrinciple(), r.getWeakestPrinciple());
+        dto.setStrongestPrincipleText(principleTexts.get(r.getStrongestPrinciple()));
+        dto.setWeakestPrincipleText(principleTexts.get(r.getWeakestPrinciple()));
         return dto;
+    }
+
+    /* ── Full question text for the given principle codes, as answered in this session ── */
+    private Map<String, String> principleTexts(UUID sessionId, String... principleCodes) {
+        List<Answer> answers = answerRepo.findBySessionId(sessionId);
+        Map<String, LeaderQuestionBank> questionsById = questionBankRepo
+                .findByQuestionIdIn(answers.stream().map(Answer::getQuestionId).toList()).stream()
+                .collect(Collectors.toMap(LeaderQuestionBank::getQuestionId, q -> q));
+
+        Set<String> wanted = Set.of(principleCodes);
+        Map<String, String> result = new HashMap<>();
+        for (Answer a : answers) {
+            LeaderQuestionBank q = questionsById.get(a.getQuestionId());
+            if (q != null && wanted.contains(q.getPrincipleCode())) result.put(q.getPrincipleCode(), q.getText());
+        }
+        return result;
     }
 
     private AssessmentSession requireOwnedSession(UUID sessionId, String email) {

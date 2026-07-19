@@ -27,6 +27,15 @@ public class AssessmentSession {
     @Column(name = "product_code", nullable = false)
     String productCode;
 
+    /** Null for leader sessions; one of LEADER_PULSE/TALENT_PULSE/SYSTEM_PULSE/GROWTH_PULSE for org sessions. */
+    @Column(name = "pulse")
+    String pulse;
+
+    /** Null for leader sessions; the org round (Order) this employee session belongs to. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "order_id")
+    Order order;
+
     @Column(name = "attempt_number", nullable = false)
     int attemptNumber;
 
