@@ -72,8 +72,8 @@ public class SecurityConfig {
         config.setAllowedOrigins(List.of(
                 "http://localhost:4300",
                 "http://localhost:4200",
-                "http://heail.in",
-                "http://www.heail.in"
+                "https://heail.in",
+                "https://www.heail.in"
         ));        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
