@@ -75,7 +75,10 @@ public class SecurityConfig {
                 "https://heail.in",
                 "https://www.heail.in"
         ));        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+        // Wildcard "*" here is invalid together with allowCredentials(true) per the CORS spec -
+        // Spring's own CORS processor rejects every request with 403 "Invalid CORS request"
+        // when both are set, regardless of whether Origin matches the allowlist above.
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
         config.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
