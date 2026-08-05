@@ -44,6 +44,9 @@ public class Order {
     @Column(name = "gateway_order_ref")
     String gatewayOrderRef;
 
+    @Column(name = "invoice_number")
+    String invoiceNumber;
+
     @Column(name = "draft_at", nullable = false, updatable = false)
     LocalDateTime draftAt;
 

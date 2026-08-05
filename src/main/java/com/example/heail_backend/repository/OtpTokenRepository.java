@@ -13,4 +13,10 @@ public interface OtpTokenRepository extends JpaRepository<OtpToken, UUID> {
     @Modifying
     @Query("UPDATE OtpToken o SET o.used = true WHERE o.email = :email")
     void invalidateAllByEmail(String email);
+
+    Optional<OtpToken> findTopByEmailAndPurposeOrderByCreatedAtDesc(String email, String purpose);
+
+    @Modifying
+    @Query("UPDATE OtpToken o SET o.used = true WHERE o.email = :email AND o.purpose = :purpose")
+    void invalidateAllByEmailAndPurpose(String email, String purpose);
 }

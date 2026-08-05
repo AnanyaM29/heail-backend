@@ -8,4 +8,8 @@ import java.util.List;
 public class OrgOrderResponse {
     OrderResponse order;
     List<OrderEmployeeDto> employees;
+    String orgName;
+    Integer orgHeadcount;
+    String orgIndustry;
+    Integer minEmployeesRequired;
 }

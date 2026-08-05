@@ -18,12 +18,14 @@ public class RegisterRequest {
     String password;
 
     @NotBlank
-    String role;
+    String city;
 
-    String organisationName;
-    String industry;
-    String sizeCategory;
+    @NotBlank
+    String country;
 
-    String organisationId;
-    String respondentLevel;
+    @NotBlank
+    String mobile;
+
+    @NotBlank
+    String otp;
 }

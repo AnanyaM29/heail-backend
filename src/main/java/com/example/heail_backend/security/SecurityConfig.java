@@ -39,6 +39,12 @@ public class SecurityConfig {
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                // Public partner-application form — no account required to apply.
+                .requestMatchers("/api/v1/partners/**").permitAll()
+                // TEMPORARY — deliberately public so the home-page "stop all emails" button
+                // works without login. Remove this line along with AdminEmailController and
+                // EmailKillSwitch once the temporary kill-switch is no longer needed.
+                .requestMatchers("/api/v1/admin/emails/**").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)

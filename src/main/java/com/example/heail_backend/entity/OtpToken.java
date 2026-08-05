@@ -22,6 +22,12 @@ public class OtpToken {
     @Column(nullable = false, length = 6)
     String otp;
 
+    // Null for the pre-existing auth flows (register/forgot-password) that never set it —
+    // only the newer profile-update flow scopes codes by purpose, so two codes emailed to
+    // the same address for two different reasons (e.g. "confirm it's you" vs "confirm your
+    // new mobile number") don't invalidate each other.
+    String purpose;
+
     @Column(name = "expires_at", nullable = false)
     LocalDateTime expiresAt;
 

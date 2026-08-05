@@ -14,7 +14,10 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/employee/pulse")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('EMPLOYEE')")
+// Was hasRole('EMPLOYEE') — see OrgOrderController for why. Ownership is enforced
+// in PulseAssessmentService via requireActiveRound(user), keyed off the caller's
+// email, not their stored role.
+@PreAuthorize("isAuthenticated()")
 public class PulseAssessmentController {
 
     private final PulseAssessmentService pulseService;

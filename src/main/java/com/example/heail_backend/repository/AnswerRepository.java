@@ -10,4 +10,5 @@ import java.util.UUID;
 public interface AnswerRepository extends JpaRepository<Answer, UUID> {
     List<Answer> findBySessionId(UUID sessionId);
     Optional<Answer> findBySessionIdAndQuestionId(UUID sessionId, String questionId);
+    List<Answer> findBySessionIdIn(List<UUID> sessionIds);
 }

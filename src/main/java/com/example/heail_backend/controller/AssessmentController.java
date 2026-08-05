@@ -15,7 +15,9 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/leader/assessment")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('LEADER')")
+// Was hasRole('LEADER') — see OrgOrderController for why. Ownership is enforced
+// in AssessmentService via the caller's email on every session/result lookup.
+@PreAuthorize("isAuthenticated()")
 public class AssessmentController {
 
     private final AssessmentService assessmentService;

@@ -18,6 +18,7 @@ public class OrderResponse {
     String status;
     LocalDateTime agreementAcceptedAt;
     String gatewayReference;
+    String invoiceNumber;
     LocalDateTime paidAt;
     LocalDateTime createdAt;
     Map<String, String> metadata;

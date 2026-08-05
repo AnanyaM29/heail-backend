@@ -51,12 +51,20 @@ public class QuestionBank {
     @Column(nullable = false)
     boolean active;
 
+    // Anchor questions are fixed (same question, every respondent, every wave) and always
+    // tagged L+MM+E — they're what makes cross-level gap/divergence/consensus indices
+    // computable at all. Rotating (non-anchor) questions still get asked but can't carry a
+    // gap figure: different respondents at different levels answer different rotating items.
+    @Column(name = "is_anchor", nullable = false, columnDefinition = "boolean default false")
+    boolean isAnchor;
+
     public short scoreFor(char option) {
         return switch (option) {
             case 'A' -> scoreA;
             case 'B' -> scoreB;
             case 'C' -> scoreC;
             case 'D' -> scoreD;
+            case 'N' -> 3; // Not applicable / prefer not to answer — scored neutral, never null
             default -> throw new IllegalArgumentException("Invalid option: " + option);
         };
     }

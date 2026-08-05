@@ -12,19 +12,38 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Random;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class AuthService {
 
     private final UserRepository         userRepo;
-    private final OrganisationRepository orgRepo;
     private final RefreshTokenRepository refreshRepo;
     private final OtpTokenRepository     otpRepo;
     private final PasswordEncoder        encoder;
     private final JwtService             jwtService;
     private final EmailService           emailService;
+
+    /* ── REGISTER: SEND EMAIL VERIFICATION CODE ───────────────────── */
+    @Transactional
+    public void sendRegistrationOtp(ForgotPasswordRequest req) {
+        String email = req.getEmail().toLowerCase();
+        if (userRepo.existsByEmail(email))
+            throw new IllegalArgumentException("Email already registered");
+
+        otpRepo.invalidateAllByEmail(email);
+
+        String otp = String.format("%06d", new Random().nextInt(1_000_000));
+
+        OtpToken otpToken = new OtpToken();
+        otpToken.setEmail(email);
+        otpToken.setOtp(otp);
+        otpToken.setExpiresAt(LocalDateTime.now().plusMinutes(15));
+        otpToken.setUsed(false);
+        otpRepo.save(otpToken);
+
+        emailService.sendRegistrationOtp(req.getEmail(), otp);
+    }
 
     /* ── REGISTER ──────────────────────────────────────────────── */
     @Transactional
@@ -32,38 +51,39 @@ public class AuthService {
         if (userRepo.existsByEmail(req.getEmail()))
             throw new IllegalArgumentException("Email already registered");
 
-        Organisation org = null;
+        String emailLower = req.getEmail().toLowerCase();
+        OtpToken token = otpRepo.findTopByEmailOrderByCreatedAtDesc(emailLower)
+                .orElseThrow(() -> new IllegalArgumentException("Please request a verification code first"));
 
-        if ("ORG_ADMIN".equalsIgnoreCase(req.getRole())) {
-            if (req.getOrganisationName() == null || req.getOrganisationName().isBlank())
-                throw new IllegalArgumentException("organisationName is required for ORG_ADMIN");
+        if (token.isUsed())
+            throw new IllegalArgumentException("This code has already been used — request a new one");
 
-            Organisation newOrg = new Organisation();
-            newOrg.setName(req.getOrganisationName());
-            newOrg.setIndustry(req.getIndustry());
-            newOrg.setSizeCategory(req.getSizeCategory());
-            org = orgRepo.save(newOrg);
+        if (token.getExpiresAt().isBefore(LocalDateTime.now()))
+            throw new IllegalArgumentException("Code has expired");
 
-        } else if ("EMPLOYEE".equalsIgnoreCase(req.getRole())) {
-            if (req.getOrganisationId() == null)
-                throw new IllegalArgumentException("organisationId is required for EMPLOYEE");
-            org = orgRepo.findById(UUID.fromString(req.getOrganisationId()))
-                    .orElseThrow(() -> new IllegalArgumentException("Organisation not found"));
-        } else if ("LEADER".equalsIgnoreCase(req.getRole())) {
-            // Leaders are independent users, not tied to any organisation.
-            org = null;
-        } else {
-            throw new IllegalArgumentException("role must be ORG_ADMIN, EMPLOYEE, or LEADER");
-        }
+        if (!token.getOtp().equals(req.getOtp()))
+            throw new IllegalArgumentException("Incorrect code");
 
+        // Only one type of account is created here — a bare "LEADER" account
+        // with no organisation attached. Anything role/organisation-specific
+        // (setting up an org round, its headcount, its industry) is deferred
+        // to the buy-org flow, right before payment — see
+        // OrgOrderService.setOrgDetails, which promotes this account to
+        // ORG_ADMIN on demand. EMPLOYEE accounts are never self-registered;
+        // they're always created by OrgOrderService.fulfil() from an invite.
         User user = new User();
         user.setName(req.getName());
         user.setEmail(req.getEmail().toLowerCase());
         user.setPasswordHash(encoder.encode(req.getPassword()));
-        user.setRole(req.getRole().toUpperCase());
-        user.setRespondentLevel(req.getRespondentLevel());
-        user.setOrganisation(org);
+        user.setRole("LEADER");
+        user.setCity(req.getCity());
+        user.setCountry(req.getCountry());
+        user.setMobile(req.getMobile());
         user = userRepo.save(user);
+
+        otpRepo.invalidateAllByEmail(emailLower);
+
+        emailService.sendAccountCreated(user.getEmail(), user.getName());
 
         return buildAuthResponse(user);
     }
@@ -127,7 +147,7 @@ public class AuthService {
             throw new IllegalArgumentException("OTP already used");
 
         if (token.getExpiresAt().isBefore(LocalDateTime.now()))
-            throw new IllegalArgumentException("OTP has expired");
+            throw new IllegalArgumentException("Code has expired");
 
         if (!token.getOtp().equals(req.getOtp()))
             throw new IllegalArgumentException("Invalid OTP");
@@ -140,10 +160,16 @@ public class AuthService {
 
         otpRepo.invalidateAllByEmail(req.getEmail().toLowerCase());
         refreshRepo.revokeAllByUserId(user.getId());
+
+        emailService.sendPasswordChanged(user.getEmail());
     }
 
-    /* ── Private helpers ───────────────────────────────────────── */
-    private AuthResponse buildAuthResponse(User user) {
+    /* ── Also used by ProfileService: a profile update can change the email
+       encoded as the JWT subject, so it needs to mint a fresh token pair
+       reflecting the new identity rather than leaving the caller holding a
+       token for an email that (after the update) no longer resolves to any
+       user. ───────────────────────────────────────────────────────────── */
+    public AuthResponse buildAuthResponse(User user) {
         String accessToken = jwtService.generateAccessToken(
                 user.getEmail(),
                 Map.of(

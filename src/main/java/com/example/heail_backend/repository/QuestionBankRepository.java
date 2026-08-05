@@ -7,5 +7,8 @@ import java.util.List;
 
 public interface QuestionBankRepository extends JpaRepository<QuestionBank, String> {
     List<QuestionBank> findBySectionCodeAndCategoryCodeAndActiveTrue(String sectionCode, String categoryCode);
+    List<QuestionBank> findBySectionCodeAndActiveTrue(String sectionCode);
     List<QuestionBank> findByQuestionIdIn(List<String> questionIds);
+    List<QuestionBank> findBySectionCodeAndIsAnchorTrueAndActiveTrue(String sectionCode);
+    List<QuestionBank> findByIsAnchorTrueAndActiveTrue();
 }

@@ -3,6 +3,7 @@ package com.example.heail_backend.service;
 import com.example.heail_backend.dto.*;
 import com.example.heail_backend.entity.*;
 import com.example.heail_backend.repository.*;
+import com.example.heail_backend.util.OptionOrder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -110,14 +111,17 @@ public class AssessmentService {
         LeaderQuestionBank question = questionBankRepo.findById(req.getQuestionId())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown question: " + req.getQuestionId()));
 
-        char selected = req.getSelectedOption().charAt(0);
-        short score = question.scoreFor(selected);
+        // The client only ever sees/sends the *displayed* letter (post-shuffle) — translate
+        // back to the original A/B/C/D the scores are actually keyed by. See OptionOrder.
+        char displayed = req.getSelectedOption().charAt(0);
+        char original = OptionOrder.toOriginal(req.getQuestionId(), displayed);
+        short score = question.scoreFor(original);
 
         Answer answer = answerRepo.findBySessionIdAndQuestionId(sessionId, req.getQuestionId())
                 .orElseGet(Answer::new);
         answer.setSession(session);
         answer.setQuestionId(req.getQuestionId());
-        answer.setSelectedOption(selected);
+        answer.setSelectedOption(displayed);
         answer.setScore(score);
         answerRepo.save(answer);
 
@@ -214,14 +218,25 @@ public class AssessmentService {
     }
 
     private QuestionDto toQuestionDto(LeaderQuestionBank q) {
+        char[] order = OptionOrder.displayOrder(q.getQuestionId());
         QuestionDto dto = new QuestionDto();
         dto.setQuestionId(q.getQuestionId());
         dto.setText(q.getText());
-        dto.setOptionA(q.getOptionA());
-        dto.setOptionB(q.getOptionB());
-        dto.setOptionC(q.getOptionC());
-        dto.setOptionD(q.getOptionD());
+        dto.setOptionA(optionText(q, order[0]));
+        dto.setOptionB(optionText(q, order[1]));
+        dto.setOptionC(optionText(q, order[2]));
+        dto.setOptionD(optionText(q, order[3]));
         return dto;
+    }
+
+    private String optionText(LeaderQuestionBank q, char original) {
+        return switch (original) {
+            case 'A' -> q.getOptionA();
+            case 'B' -> q.getOptionB();
+            case 'C' -> q.getOptionC();
+            case 'D' -> q.getOptionD();
+            default -> throw new IllegalArgumentException("Invalid option: " + original);
+        };
     }
 
     private LeaderResultResponse toResponse(LeaderResult r) {

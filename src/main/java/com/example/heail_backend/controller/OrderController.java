@@ -1,6 +1,7 @@
 package com.example.heail_backend.controller;
 
 import com.example.heail_backend.dto.AcceptAgreementRequest;
+import com.example.heail_backend.dto.CapturePaypalOrderRequest;
 import com.example.heail_backend.dto.OrderDetailsRequest;
 import com.example.heail_backend.dto.OrderResponse;
 import com.example.heail_backend.service.OrderService;
@@ -16,7 +17,10 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/leader/orders")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('LEADER')")
+// Was hasRole('LEADER') — see OrgOrderController for why: single-role-column
+// users can otherwise get locked out of a product they legitimately hold.
+// Ownership is enforced in OrderService via requireOwnedOrder(id, email).
+@PreAuthorize("isAuthenticated()")
 public class OrderController {
 
     private final OrderService orderService;
@@ -45,8 +49,15 @@ public class OrderController {
         return ResponseEntity.ok(orderService.acceptAgreement(id, auth.getName(), req.getVersion()));
     }
 
-    @PostMapping("/{id}/pay")
-    public ResponseEntity<OrderResponse> pay(@PathVariable UUID id, Authentication auth) {
-        return ResponseEntity.ok(orderService.payMock(id, auth.getName()));
+    @PostMapping("/{id}/create-paypal-order")
+    public ResponseEntity<OrderResponse> createPaypalOrder(@PathVariable UUID id, Authentication auth) {
+        return ResponseEntity.ok(orderService.createPaypalOrder(id, auth.getName()));
+    }
+
+    @PostMapping("/{id}/capture-paypal-order")
+    public ResponseEntity<OrderResponse> capturePaypalOrder(@PathVariable UUID id,
+                                                              @Valid @RequestBody CapturePaypalOrderRequest req,
+                                                              Authentication auth) {
+        return ResponseEntity.ok(orderService.capturePaypalOrder(id, auth.getName(), req.getPaypalOrderId()));
     }
 }

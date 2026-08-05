@@ -31,6 +31,12 @@ public class User {
     @Column(name = "respondent_level")
     String respondentLevel;
 
+    String city;
+
+    String country;
+
+    String mobile;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "organisation_id")
     Organisation organisation;

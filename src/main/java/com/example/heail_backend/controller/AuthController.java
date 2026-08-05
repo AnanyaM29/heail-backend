@@ -17,6 +17,12 @@ public class AuthController {
 
     private final AuthService authService;
 
+    @PostMapping("/register/send-otp")
+    public ResponseEntity<Map<String, String>> sendRegistrationOtp(@Valid @RequestBody ForgotPasswordRequest req) {
+        authService.sendRegistrationOtp(req);
+        return ResponseEntity.ok(Map.of("message", "Verification code sent"));
+    }
+
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(req));

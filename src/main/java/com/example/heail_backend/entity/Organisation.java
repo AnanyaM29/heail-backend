@@ -19,10 +19,13 @@ public class Organisation {
     @Column(nullable = false)
     String name;
 
-    String industry;
+    // Filled at org registration, used to compute the minimum sample size
+    // required on the employee-upload step (see OrgOrderService.minRequiredEmployees).
+    Integer headcount;
 
-    @Column(name = "size_category")
-    String sizeCategory;
+    // Filled later, before payment (buy-org employee-details step) — not
+    // collected at registration time.
+    String industry;
 
     @Column(name = "created_at", updatable = false)
     LocalDateTime createdAt;

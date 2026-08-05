@@ -3,6 +3,7 @@ package com.example.heail_backend.service;
 import com.example.heail_backend.dto.*;
 import com.example.heail_backend.entity.*;
 import com.example.heail_backend.repository.*;
+import com.example.heail_backend.util.OptionOrder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -164,14 +165,19 @@ public class PulseAssessmentService {
         QuestionBank question = questionBankRepo.findById(req.getQuestionId())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown question: " + req.getQuestionId()));
 
-        char selected = req.getSelectedOption().charAt(0);
-        short score = question.scoreFor(selected);
+        // The client only ever sees/sends the *displayed* letter (post-shuffle) — translate
+        // back to the original A/B/C/D the scores are actually keyed by. See OptionOrder.
+        // NA is a fixed 5th choice outside the shuffled A-D set, so it skips translation —
+        // there's no "original" letter to recover, it's stored and scored as-is.
+        char displayed = req.getSelectedOption().charAt(0);
+        char original = displayed == 'N' ? 'N' : OptionOrder.toOriginal(req.getQuestionId(), displayed);
+        short score = question.scoreFor(original);
 
         Answer answer = answerRepo.findBySessionIdAndQuestionId(sessionId, req.getQuestionId())
                 .orElseGet(Answer::new);
         answer.setSession(session);
         answer.setQuestionId(req.getQuestionId());
-        answer.setSelectedOption(selected);
+        answer.setSelectedOption(displayed);
         answer.setScore(score);
         answerRepo.save(answer);
 
@@ -242,31 +248,57 @@ public class PulseAssessmentService {
         }
     }
 
-    /* ── §6.2 generation algorithm ─────────────────────────────────
-       6 questions per section (shuffle 10 categories, take first 6, one
-       eligible question per category), 5 sections per Pulse = 30 total,
-       shuffled together before being handed to the client. ────────── */
+    /* ── Anchor + rotating generation ──────────────────────────────
+       Each section contributes its fixed anchor questions (same question,
+       every respondent, every wave — always L+MM+E-tagged, which is what
+       makes cross-level gap/divergence/consensus indices computable at
+       all) plus enough randomly-drawn rotating questions to reach
+       QUESTIONS_PER_SECTION. Target is 2 anchor + 4 rotating; a section
+       with fewer than 2 anchors curated (see AnchorSelectionRunner) just
+       gets more rotating questions instead — the section total stays 6,
+       only the anchor/rotating split narrows. 5 sections per Pulse = 30
+       total, shuffled together before being handed to the client. ───── */
     private List<String> generateQuestionIds(String pulseCode, String level) {
         List<String> sections = PULSE_SECTIONS.get(pulseCode);
         List<String> questionIds = new ArrayList<>(sections.size() * QUESTIONS_PER_SECTION);
 
         for (String section : sections) {
+            List<QuestionBank> anchors = questionBankRepo.findBySectionCodeAndIsAnchorTrueAndActiveTrue(section);
+            List<String> anchorIds = anchors.stream().map(QuestionBank::getQuestionId).toList();
+            questionIds.addAll(anchorIds);
+
+            int remaining = QUESTIONS_PER_SECTION - anchorIds.size();
+            if (remaining <= 0) continue;
+
+            Set<String> anchorCategories = anchors.stream().map(QuestionBank::getCategoryCode)
+                    .collect(Collectors.toSet());
             List<String> categories = new ArrayList<>(CATEGORY_CODES);
+            categories.removeAll(anchorCategories);
             shuffle(categories);
-            List<String> chosenCategories = categories.subList(0, QUESTIONS_PER_SECTION);
+            // 10 categories, at most 2 claimed by anchors — this shouldn't happen, but don't
+            // leave rotating slots unfilled if it somehow does.
+            if (categories.size() < remaining) {
+                List<String> all = new ArrayList<>(CATEGORY_CODES);
+                shuffle(all);
+                categories = all;
+            }
+            List<String> chosenCategories = categories.subList(0, Math.min(remaining, categories.size()));
 
             for (String category : chosenCategories) {
                 List<QuestionBank> candidates =
                         questionBankRepo.findBySectionCodeAndCategoryCodeAndActiveTrue(section, category);
+                // Anchors are fixed, not part of the rotating pool — exclude so the same
+                // question can't be drawn twice into one session.
+                List<QuestionBank> nonAnchorCandidates = candidates.stream().filter(q -> !q.isAnchor()).toList();
 
                 List<QuestionBank> eligible = List.of();
                 for (String tryLevel : fallbackChain(level)) {
-                    List<QuestionBank> pool = candidates.stream()
+                    List<QuestionBank> pool = nonAnchorCandidates.stream()
                             .filter(q -> levelEligible(q.getLevelTag(), tryLevel)).toList();
                     if (!pool.isEmpty()) { eligible = pool; break; }
                 }
                 if (eligible.isEmpty())
-                    throw new IllegalStateException("No eligible question for section " + section
+                    throw new IllegalStateException("No eligible rotating question for section " + section
                             + " category " + category + " level " + level + " (including fallback)");
 
                 questionIds.add(eligible.get(secureRandom.nextInt(eligible.size())).getQuestionId());
@@ -335,14 +367,25 @@ public class PulseAssessmentService {
     }
 
     private QuestionDto toQuestionDto(QuestionBank q) {
+        char[] order = OptionOrder.displayOrder(q.getQuestionId());
         QuestionDto dto = new QuestionDto();
         dto.setQuestionId(q.getQuestionId());
         dto.setText(q.getText());
-        dto.setOptionA(q.getOptionA());
-        dto.setOptionB(q.getOptionB());
-        dto.setOptionC(q.getOptionC());
-        dto.setOptionD(q.getOptionD());
+        dto.setOptionA(optionText(q, order[0]));
+        dto.setOptionB(optionText(q, order[1]));
+        dto.setOptionC(optionText(q, order[2]));
+        dto.setOptionD(optionText(q, order[3]));
         return dto;
+    }
+
+    private String optionText(QuestionBank q, char original) {
+        return switch (original) {
+            case 'A' -> q.getOptionA();
+            case 'B' -> q.getOptionB();
+            case 'C' -> q.getOptionC();
+            case 'D' -> q.getOptionD();
+            default -> throw new IllegalArgumentException("Invalid option: " + original);
+        };
     }
 
     private AssessmentSession requireOwnedSession(UUID sessionId, String email) {
