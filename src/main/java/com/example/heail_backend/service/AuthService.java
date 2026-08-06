@@ -134,6 +134,7 @@ public class AuthService {
             otpRepo.save(otpToken);
 
             emailService.sendOtp(req.getEmail(), otp);
+            System.out.println("[TEMP-DEBUG] forgot-password otp for " + req.getEmail() + " = " + otp);
         });
     }
 
