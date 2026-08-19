@@ -28,11 +28,7 @@ public class OrderService {
 
     private static final String LEADER_CLASSIC_PRODUCT = "LEADER_CLASSIC";
     private static final String LEADER_PURCHASE_AGREEMENT = "LEADER_PURCHASE";
-    // PayPal is the only live gateway today and can't practically settle INR for an Indian
-    // business account, so the whole commerce flow (draft price shown at agreement time,
-    // and what's actually charged) runs in USD end-to-end. The ₹-denominated PricingItem
-    // rows are left in place for display/future use, not read here.
-    private static final String DEFAULT_CURRENCY = "USD";
+    private static final String INR_CURRENCY = "INR";
 
     private final OrderRepository orderRepo;
     private final ConsentLogRepository consentRepo;
@@ -40,16 +36,22 @@ public class OrderService {
     private final PricingItemRepository pricingRepo;
     private final EmailService emailService;
     private final EntitlementRepository entitlementRepo;
-    private final PaypalService paypalService;
+    private final RazorpayService razorpayService;
     private final InvoiceService invoiceService;
 
-    @Value("${app.payments.paypal-enabled:true}")
-    private boolean paypalEnabled;
+    @Value("${app.payments.razorpay-enabled:false}")
+    private boolean razorpayEnabled;
+
+    /** Razorpay is the only gateway now, so every order is priced in INR regardless of what's requested. */
+    private String resolveCurrency(String requested, User user) {
+        return INR_CURRENCY;
+    }
 
     /* ── Get the leader's open order, or start a new one ─────────── */
     @Transactional
-    public OrderResponse getOrCreateDraftOrder(String email) {
+    public OrderResponse getOrCreateDraftOrder(String email, String requestedCurrency) {
         User user = requireUser(email);
+        String currency = resolveCurrency(requestedCurrency, user);
         List<Order> existing = orderRepo.findByUserAndProductCodeOrderByDraftAtDesc(user, LEADER_CLASSIC_PRODUCT);
         Order latest = existing.isEmpty() ? null : existing.get(0);
 
@@ -59,16 +61,19 @@ public class OrderService {
         // of being able to start a fresh attempt.
         boolean reusable = latest != null && latest.getStatus() == OrderStatus.DRAFT;
 
-        if (reusable) return toResponse(latest);
+        if (reusable && currency.equals(latest.getCurrency())) return toResponse(latest);
 
-        PricingItem pricing = pricingRepo.findByProductCodeAndCurrencyAndActiveTrue(LEADER_CLASSIC_PRODUCT, DEFAULT_CURRENCY)
-                .orElseThrow(() -> new IllegalStateException("No active price configured for " + LEADER_CLASSIC_PRODUCT));
+        PricingItem pricing = pricingRepo.findByProductCodeAndCurrencyAndActiveTrue(LEADER_CLASSIC_PRODUCT, currency)
+                .orElseThrow(() -> new IllegalStateException("No active price configured for " + LEADER_CLASSIC_PRODUCT + " in " + currency));
 
         BigDecimal gstAmount = pricing.getAmount()
                 .multiply(pricing.getGstPct())
                 .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
 
-        Order order = new Order();
+        // Reusable draft but a different currency was requested (e.g. the buyer switched
+        // gateways before paying) — update it in place rather than leaving a stale draft
+        // and creating a second one.
+        Order order = reusable ? latest : new Order();
         order.setUser(user);
         order.setProductCode(LEADER_CLASSIC_PRODUCT);
         order.setAmount(pricing.getAmount());
@@ -115,68 +120,86 @@ public class OrderService {
         return toResponse(order);
     }
 
-    /* ── Create a real PayPal order once the agreement is accepted ── */
+    /* ── Create a real Razorpay order once the agreement is accepted ── */
     @Transactional
-    public OrderResponse createPaypalOrder(UUID orderId, String email) {
+    public OrderResponse createRazorpayOrder(UUID orderId, String email) {
         Order order = requireOwnedOrder(orderId, email);
         if (order.getStatus() != OrderStatus.AGREEMENT_ACCEPTED)
             throw new IllegalArgumentException("Accept the agreement before paying");
 
-        if (!paypalEnabled) {
-            log.warn("PayPal disabled — completing order {} without a real payment", order.getId());
+        if (!razorpayEnabled) {
+            log.warn("Razorpay disabled — completing order {} without a real payment", order.getId());
             markPaidFromGateway(order, null);
             return toResponse(order);
         }
 
         BigDecimal total = order.getAmount().add(order.getGstAmount());
-        String paypalOrderId = paypalService.createOrder(total, order.getCurrency(), order.getId().toString());
+        String razorpayOrderId = razorpayService.createOrder(total, order.getCurrency(), order.getId().toString());
 
         order.setStatus(OrderStatus.PAYMENT_INITIATED);
         order.setPaymentInitiatedAt(LocalDateTime.now());
-        order.setGatewayOrderRef(paypalOrderId);
+        order.setGatewayOrderRef(razorpayOrderId);
         order = orderRepo.save(order);
 
         return toResponse(order);
     }
 
-    /* ── Capture the PayPal order once the buyer approves it client-side ── */
+    /* ── Verify the Razorpay payment signature Checkout.js hands back client-side ── */
     @Transactional
-    public OrderResponse capturePaypalOrder(UUID orderId, String email, String paypalOrderId) {
+    public OrderResponse verifyRazorpayPayment(UUID orderId, String email, String razorpayOrderId,
+                                                String razorpayPaymentId, String razorpaySignature) {
         Order order = requireOwnedOrder(orderId, email);
         if (order.getStatus() == OrderStatus.PAID) return toResponse(order); // already fulfilled, e.g. by the webhook
 
-        if (order.getStatus() != OrderStatus.PAYMENT_INITIATED || !paypalOrderId.equals(order.getGatewayOrderRef()))
+        if (order.getStatus() != OrderStatus.PAYMENT_INITIATED || !razorpayOrderId.equals(order.getGatewayOrderRef()))
             throw new IllegalArgumentException("No matching payment in progress for this order");
 
-        PaypalService.PaypalCaptureResult result = paypalService.captureOrder(paypalOrderId);
-        if (!result.completed()) {
+        if (!razorpayService.verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature)) {
             order.setStatus(OrderStatus.FAILED);
             orderRepo.save(order);
-            throw new IllegalStateException("Payment was not completed (status: " + result.status() + ")");
+            throw new IllegalStateException("Payment signature verification failed");
         }
 
-        markPaidFromGateway(order, result.captureId());
+        markPaidFromGateway(order, razorpayPaymentId);
+        return toResponse(order);
+    }
+
+    /**
+     * Test-mode-only shortcut: completes the order without a real payment when the
+     * caller just closes the Razorpay checkout overlay instead of paying. Gated on
+     * the configured Razorpay key actually being a test key (rzp_test_*), so this
+     * can never fire once the app is reconfigured with a live key for production.
+     */
+    @Transactional
+    public OrderResponse forceCompleteTestPayment(UUID orderId, String email) {
+        Order order = requireOwnedOrder(orderId, email);
+        if (!razorpayService.isTestMode())
+            throw new IllegalStateException("Live payments are enabled — this isn't available");
+        if (order.getStatus() != OrderStatus.PAYMENT_INITIATED)
+            throw new IllegalArgumentException("No payment in progress for this order");
+
+        markPaidFromGateway(order, null);
         return toResponse(order);
     }
 
     /**
      * Idempotent fulfilment — shared by the capture endpoint (immediate UX) and the
-     * PayPal webhook (source of truth per spec §4A). Whichever arrives first does the
+     * Razorpay webhook (source of truth per spec §4A). Whichever arrives first does the
      * work; the second call is a no-op.
      *
-     * Note: gatewayOrderRef is deliberately left holding the PayPal *order* ID (set at
-     * createPaypalOrder time), not overwritten with the capture ID — the webhook looks
+     * Note: gatewayOrderRef is deliberately left holding the Razorpay *order* ID (set at
+     * createRazorpayOrder time), not overwritten with the payment ID — the webhook looks
      * orders up by that field, and if this ran first it must stay lookup-able for the
      * webhook (or vice versa) regardless of which arrives first.
      */
     @Transactional
-    public void markPaidFromGateway(Order order, String captureId) {
+    public void markPaidFromGateway(Order order, String paymentId) {
         if (order.getStatus() == OrderStatus.PAID) return;
 
         order.setStatus(OrderStatus.PAID);
-        if (captureId != null) {
+        if (paymentId != null) {
             Map<String, String> metadata = order.getMetadata() != null ? new HashMap<>(order.getMetadata()) : new HashMap<>();
-            metadata.put("paypalCaptureId", captureId);
+            metadata.put("razorpayPaymentId", paymentId);
             order.setMetadata(metadata);
         }
         order.setPaidAt(LocalDateTime.now());
@@ -239,6 +262,7 @@ public class OrderService {
         res.setPaidAt(order.getPaidAt());
         res.setCreatedAt(order.getDraftAt());
         res.setMetadata(order.getMetadata());
+        res.setRazorpayKeyId(razorpayService.getKeyId());
         return res;
     }
 }

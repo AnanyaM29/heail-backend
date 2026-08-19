@@ -2,9 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "heail-backend",
+      "runtimeExecutable": "D:/heail-backend/run-backend.bat",
+      "runtimeArgs": [],
+      "port": 8080
+    },
+    {
       "name": "heail-frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "D:/heail-frontend/heail-frontend", "run", "start"],
+      "url": "http://localhost:4200",
       "port": 4200
     }
   ]

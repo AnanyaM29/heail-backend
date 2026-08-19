@@ -50,8 +50,8 @@ public class ScoringService {
             "SYSTEM_PULSE", List.of("S09", "S10", "S12", "S13", "S14"),
             "GROWTH_PULSE", List.of("S15", "S17", "S18", "S19", "S20"));
     private static final Map<String, String> PULSE_DISPLAY_NAMES = Map.of(
-            "LEADER_PULSE", "LeaderPulse™", "TALENT_PULSE", "TalentPulse™",
-            "SYSTEM_PULSE", "SystemPulse™", "GROWTH_PULSE", "GrowthPulse™");
+            "LEADER_PULSE", "LeaderPulse", "TALENT_PULSE", "TalentPulse",
+            "SYSTEM_PULSE", "SystemPulse", "GROWTH_PULSE", "GrowthPulse");
 
     // Family 4 (Risk) section mapping — fixed by definition, see index architecture doc.
     private static final String TRUST_SECTION = "S02";       // Management Integrity & Trust

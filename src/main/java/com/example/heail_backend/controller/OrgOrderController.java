@@ -1,12 +1,13 @@
 package com.example.heail_backend.controller;
 
 import com.example.heail_backend.dto.AcceptAgreementRequest;
-import com.example.heail_backend.dto.CapturePaypalOrderRequest;
+import com.example.heail_backend.dto.CreateOrderRequest;
 import com.example.heail_backend.dto.EmployeeRowRequest;
 import com.example.heail_backend.dto.OrgMonitorResponse;
 import com.example.heail_backend.dto.OrgOrderResponse;
 import com.example.heail_backend.dto.OrgReportResponse;
 import com.example.heail_backend.dto.SetOrgDetailsRequest;
+import com.example.heail_backend.dto.VerifyRazorpayPaymentRequest;
 import com.example.heail_backend.service.OrgOrderService;
 import io.micrometer.common.lang.Nullable;
 import jakarta.validation.Valid;
@@ -33,8 +34,8 @@ public class OrgOrderController {
     private final OrgOrderService orgOrderService;
 
     @PostMapping
-    public ResponseEntity<OrgOrderResponse> createOrGet(Authentication auth) {
-        return ResponseEntity.ok(orgOrderService.getOrCreateDraftOrder(auth.getName()));
+    public ResponseEntity<OrgOrderResponse> createOrGet(@RequestBody(required = false) CreateOrderRequest req, Authentication auth) {
+        return ResponseEntity.ok(orgOrderService.getOrCreateDraftOrder(auth.getName(), req == null ? null : req.getCurrency()));
     }
 
     @GetMapping("/{id}")
@@ -69,16 +70,32 @@ public class OrgOrderController {
         return ResponseEntity.ok(orgOrderService.acceptAgreement(id, auth.getName(), req.getVersion()));
     }
 
-    @PostMapping("/{id}/create-paypal-order")
-    public ResponseEntity<OrgOrderResponse> createPaypalOrder(@PathVariable UUID id, Authentication auth) {
-        return ResponseEntity.ok(orgOrderService.createPaypalOrder(id, auth.getName()));
+    // Payment endpoints are ORG_ADMIN/SUPERADMIN-only (unlike the rest of this
+    // controller) — by the time a round reaches payment, setOrgDetails() has
+    // already promoted the account from LEADER to ORG_ADMIN, so this doesn't
+    // block onboarding; it just stops a non-org-admin account (e.g. an
+    // EMPLOYEE respondent) from paying for a round it doesn't own. SUPERADMIN
+    // is included so it can walk a round through to completion on a client's
+    // behalf (e.g. manual/offline payment, since Razorpay is disabled by default).
+    @PostMapping("/{id}/create-razorpay-order")
+    @PreAuthorize("hasAnyRole('ORG_ADMIN', 'SUPERADMIN')")
+    public ResponseEntity<OrgOrderResponse> createRazorpayOrder(@PathVariable UUID id, Authentication auth) {
+        return ResponseEntity.ok(orgOrderService.createRazorpayOrder(id, auth.getName()));
     }
 
-    @PostMapping("/{id}/capture-paypal-order")
-    public ResponseEntity<OrgOrderResponse> capturePaypalOrder(@PathVariable UUID id,
-                                                                 @Valid @RequestBody CapturePaypalOrderRequest req,
-                                                                 Authentication auth) {
-        return ResponseEntity.ok(orgOrderService.capturePaypalOrder(id, auth.getName(), req.getPaypalOrderId()));
+    @PostMapping("/{id}/verify-razorpay-payment")
+    @PreAuthorize("hasAnyRole('ORG_ADMIN', 'SUPERADMIN')")
+    public ResponseEntity<OrgOrderResponse> verifyRazorpayPayment(@PathVariable UUID id,
+                                                                     @Valid @RequestBody VerifyRazorpayPaymentRequest req,
+                                                                     Authentication auth) {
+        return ResponseEntity.ok(orgOrderService.verifyRazorpayPayment(id, auth.getName(),
+                req.getRazorpayOrderId(), req.getRazorpayPaymentId(), req.getRazorpaySignature()));
+    }
+
+    @PostMapping("/{id}/force-complete-test-payment")
+    @PreAuthorize("hasAnyRole('ORG_ADMIN', 'SUPERADMIN')")
+    public ResponseEntity<OrgOrderResponse> forceCompleteTestPayment(@PathVariable UUID id, Authentication auth) {
+        return ResponseEntity.ok(orgOrderService.forceCompleteTestPayment(id, auth.getName()));
     }
 
     @PostMapping("/{id}/cancel")

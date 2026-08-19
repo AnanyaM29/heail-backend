@@ -140,10 +140,10 @@ public class PulseReminderScheduler {
 
     private String displayName(String pulseCode) {
         return switch (pulseCode) {
-            case "LEADER_PULSE" -> "LeaderPulse™";
-            case "TALENT_PULSE" -> "TalentPulse™";
-            case "SYSTEM_PULSE" -> "SystemPulse™";
-            case "GROWTH_PULSE" -> "GrowthPulse™";
+            case "LEADER_PULSE" -> "LeaderPulse";
+            case "TALENT_PULSE" -> "TalentPulse";
+            case "SYSTEM_PULSE" -> "SystemPulse";
+            case "GROWTH_PULSE" -> "GrowthPulse";
             default -> pulseCode;
         };
     }

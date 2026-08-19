@@ -4,6 +4,7 @@ import com.example.heail_backend.dto.*;
 import com.example.heail_backend.entity.*;
 import com.example.heail_backend.repository.*;
 import com.example.heail_backend.util.OptionOrder;
+import com.example.heail_backend.util.SessionTimer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -119,7 +120,11 @@ public class PulseAssessmentService {
 
         Optional<AssessmentSession> inProgress = existing.stream()
                 .filter(s -> s.getStatus() == SessionStatus.IN_PROGRESS).findFirst();
-        if (inProgress.isPresent()) return toStartResponse(inProgress.get());
+        if (inProgress.isPresent()) {
+            AssessmentSession resumed = inProgress.get();
+            if (SessionTimer.applyResumeGrace(resumed)) resumed = sessionRepo.save(resumed);
+            return toStartResponse(resumed);
+        }
 
         List<String> questionIds = generateQuestionIds(pulseCode, level);
 
@@ -137,9 +142,11 @@ public class PulseAssessmentService {
     }
 
     /* ── Resume: current questions + what's already answered ─────── */
-    @Transactional(readOnly = true)
+    @Transactional
     public SessionResumeResponse resume(UUID sessionId, String email) {
         AssessmentSession session = requireOwnedSession(sessionId, email);
+        if (session.getStatus() == SessionStatus.IN_PROGRESS && SessionTimer.applyResumeGrace(session))
+            session = sessionRepo.save(session);
 
         Map<String, String> answered = answerRepo.findBySessionId(sessionId).stream()
                 .collect(Collectors.toMap(Answer::getQuestionId, a -> String.valueOf(a.getSelectedOption())));
@@ -148,8 +155,9 @@ public class PulseAssessmentService {
         res.setSessionId(session.getId());
         res.setAttemptNumber(session.getAttemptNumber());
         res.setStatus(session.getStatus().name());
-        res.setQuestions(toOrderedQuestionDtos(session.getQuestionIds()));
+        res.setQuestions(toOrderedQuestionDtos(session.getQuestionIds(), session.getId()));
         res.setAnsweredOptions(answered);
+        res.setDeadlineAt(session.getDeadlineAt());
         return res;
     }
 
@@ -170,7 +178,7 @@ public class PulseAssessmentService {
         // NA is a fixed 5th choice outside the shuffled A-D set, so it skips translation —
         // there's no "original" letter to recover, it's stored and scored as-is.
         char displayed = req.getSelectedOption().charAt(0);
-        char original = displayed == 'N' ? 'N' : OptionOrder.toOriginal(req.getQuestionId(), displayed);
+        char original = displayed == 'N' ? 'N' : OptionOrder.toOriginal(req.getQuestionId(), session.getId(), displayed);
         short score = question.scoreFor(original);
 
         Answer answer = answerRepo.findBySessionIdAndQuestionId(sessionId, req.getQuestionId())
@@ -333,10 +341,10 @@ public class PulseAssessmentService {
 
     private String displayName(String pulseCode) {
         return switch (pulseCode) {
-            case "LEADER_PULSE" -> "LeaderPulse™";
-            case "TALENT_PULSE" -> "TalentPulse™";
-            case "SYSTEM_PULSE" -> "SystemPulse™";
-            case "GROWTH_PULSE" -> "GrowthPulse™";
+            case "LEADER_PULSE" -> "LeaderPulse";
+            case "TALENT_PULSE" -> "TalentPulse";
+            case "SYSTEM_PULSE" -> "SystemPulse";
+            case "GROWTH_PULSE" -> "GrowthPulse";
             default -> pulseCode;
         };
     }
@@ -356,18 +364,19 @@ public class PulseAssessmentService {
         StartAssessmentResponse res = new StartAssessmentResponse();
         res.setSessionId(session.getId());
         res.setAttemptNumber(session.getAttemptNumber());
-        res.setQuestions(toOrderedQuestionDtos(session.getQuestionIds()));
+        res.setQuestions(toOrderedQuestionDtos(session.getQuestionIds(), session.getId()));
+        res.setDeadlineAt(session.getDeadlineAt());
         return res;
     }
 
-    private List<QuestionDto> toOrderedQuestionDtos(List<String> ids) {
+    private List<QuestionDto> toOrderedQuestionDtos(List<String> ids, UUID sessionId) {
         Map<String, QuestionBank> byId = questionBankRepo.findByQuestionIdIn(ids).stream()
                 .collect(Collectors.toMap(QuestionBank::getQuestionId, q -> q));
-        return ids.stream().map(id -> toQuestionDto(byId.get(id))).toList();
+        return ids.stream().map(id -> toQuestionDto(byId.get(id), sessionId)).toList();
     }
 
-    private QuestionDto toQuestionDto(QuestionBank q) {
-        char[] order = OptionOrder.displayOrder(q.getQuestionId());
+    private QuestionDto toQuestionDto(QuestionBank q, UUID sessionId) {
+        char[] order = OptionOrder.displayOrder(q.getQuestionId(), sessionId);
         QuestionDto dto = new QuestionDto();
         dto.setQuestionId(q.getQuestionId());
         dto.setText(q.getText());

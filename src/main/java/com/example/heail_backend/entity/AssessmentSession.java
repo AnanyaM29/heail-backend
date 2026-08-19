@@ -53,8 +53,17 @@ public class AssessmentSession {
     @Column(name = "completed_at")
     LocalDateTime completedAt;
 
+    /** 30-minute time limit, set on start; extended once on resume-after-expiry. See PulseAssessmentService/AssessmentService.resume(). */
+    @Column(name = "deadline_at")
+    LocalDateTime deadlineAt;
+
+    /** How many times the one-time "ran out and came back" 5-min grace extension has been granted (0 or 1 — never a 2nd time). */
+    @Column(name = "resume_grants_used", nullable = false, columnDefinition = "integer default 0")
+    int resumeGrantsUsed;
+
     @PrePersist
     void prePersist() {
         this.startedAt = LocalDateTime.now();
+        this.deadlineAt = this.startedAt.plusMinutes(30);
     }
 }

@@ -27,6 +27,13 @@ public class AssessmentController {
         return ResponseEntity.ok(assessmentService.start(auth.getName()));
     }
 
+    @GetMapping("/entitlement")
+    public ResponseEntity<EntitlementResponse> entitlement(Authentication auth) {
+        EntitlementResponse res = new EntitlementResponse();
+        res.setEntitled(assessmentService.hasEntitlement(auth.getName()));
+        return ResponseEntity.ok(res);
+    }
+
     @GetMapping("/current")
     public ResponseEntity<SessionResumeResponse> current(Authentication auth) {
         return assessmentService.current(auth.getName())

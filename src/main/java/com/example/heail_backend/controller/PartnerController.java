@@ -1,6 +1,6 @@
 package com.example.heail_backend.controller;
 
-import com.example.heail_backend.dto.ForgotPasswordRequest;
+import com.example.heail_backend.dto.PartnerOtpRequest;
 import com.example.heail_backend.service.PartnerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -16,8 +16,8 @@ public class PartnerController {
     private final PartnerService partnerService;
 
     @PostMapping("/send-otp")
-    public ResponseEntity<?> sendOtp(@Valid @RequestBody ForgotPasswordRequest req) {
-        partnerService.sendOtp(req.getEmail());
+    public ResponseEntity<?> sendOtp(@Valid @RequestBody PartnerOtpRequest req) {
+        partnerService.sendOtp(req.getEmail(), req.getMobile());
         return ResponseEntity.ok().body(java.util.Map.of("message", "Verification code sent"));
     }
 

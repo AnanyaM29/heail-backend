@@ -41,10 +41,11 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // Public partner-application form — no account required to apply.
                 .requestMatchers("/api/v1/partners/**").permitAll()
-                // TEMPORARY — deliberately public so the home-page "stop all emails" button
-                // works without login. Remove this line along with AdminEmailController and
-                // EmailKillSwitch once the temporary kill-switch is no longer needed.
-                .requestMatchers("/api/v1/admin/emails/**").permitAll()
+                // Gateway webhooks (Razorpay) are called by the gateway's own
+                // servers, never by a logged-in user — they can't send a JWT. Authenticity
+                // is verified inside PaymentWebhookController via each gateway's own
+                // signature check, not Spring Security.
+                .requestMatchers("/api/v1/webhooks/**").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)

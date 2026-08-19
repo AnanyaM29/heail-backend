@@ -4,6 +4,7 @@ import com.example.heail_backend.dto.*;
 import com.example.heail_backend.entity.*;
 import com.example.heail_backend.repository.*;
 import com.example.heail_backend.util.OptionOrder;
+import com.example.heail_backend.util.SessionTimer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -69,12 +70,27 @@ public class AssessmentService {
         StartAssessmentResponse res = new StartAssessmentResponse();
         res.setSessionId(session.getId());
         res.setAttemptNumber(session.getAttemptNumber());
-        res.setQuestions(toOrderedQuestionDtos(questionIds));
+        res.setQuestions(toOrderedQuestionDtos(questionIds, session.getId()));
+        res.setDeadlineAt(session.getDeadlineAt());
         return res;
     }
 
-    /* ── The caller's in-progress session, if any (resume-after-login) ── */
+    /* ── Whether the caller currently holds an unused entitlement — checked
+       proactively by the dashboard so it doesn't show "Start Assessment"
+       before payment has actually gone through. ─────────────────────── */
     @Transactional(readOnly = true)
+    public boolean hasEntitlement(String email) {
+        User user = requireUser(email);
+        return entitlementRepo
+                .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, LEADER_CLASSIC_PRODUCT)
+                .isPresent();
+    }
+
+    /* ── The caller's in-progress session, if any (resume-after-login) ──
+       Not readOnly: delegates to resume() via a plain (non-proxied) self-call,
+       which may need to persist a resume-grace deadline extension — a readOnly
+       transaction here would silently swallow that write. ─────────────── */
+    @Transactional
     public Optional<SessionResumeResponse> current(String email) {
         User user = requireUser(email);
         return sessionRepo
@@ -83,9 +99,11 @@ public class AssessmentService {
     }
 
     /* ── Resume: current questions + what's already answered ─────── */
-    @Transactional(readOnly = true)
+    @Transactional
     public SessionResumeResponse resume(UUID sessionId, String email) {
         AssessmentSession session = requireOwnedSession(sessionId, email);
+        if (session.getStatus() == SessionStatus.IN_PROGRESS && SessionTimer.applyResumeGrace(session))
+            session = sessionRepo.save(session);
 
         Map<String, String> answered = answerRepo.findBySessionId(sessionId).stream()
                 .collect(Collectors.toMap(Answer::getQuestionId, a -> String.valueOf(a.getSelectedOption())));
@@ -94,8 +112,9 @@ public class AssessmentService {
         res.setSessionId(session.getId());
         res.setAttemptNumber(session.getAttemptNumber());
         res.setStatus(session.getStatus().name());
-        res.setQuestions(toOrderedQuestionDtos(session.getQuestionIds()));
+        res.setQuestions(toOrderedQuestionDtos(session.getQuestionIds(), session.getId()));
         res.setAnsweredOptions(answered);
+        res.setDeadlineAt(session.getDeadlineAt());
         return res;
     }
 
@@ -114,7 +133,7 @@ public class AssessmentService {
         // The client only ever sees/sends the *displayed* letter (post-shuffle) — translate
         // back to the original A/B/C/D the scores are actually keyed by. See OptionOrder.
         char displayed = req.getSelectedOption().charAt(0);
-        char original = OptionOrder.toOriginal(req.getQuestionId(), displayed);
+        char original = OptionOrder.toOriginal(req.getQuestionId(), session.getId(), displayed);
         short score = question.scoreFor(original);
 
         Answer answer = answerRepo.findBySessionIdAndQuestionId(sessionId, req.getQuestionId())
@@ -211,14 +230,14 @@ public class AssessmentService {
         return LeaderBand.BEGINNING;
     }
 
-    private List<QuestionDto> toOrderedQuestionDtos(List<String> ids) {
+    private List<QuestionDto> toOrderedQuestionDtos(List<String> ids, UUID sessionId) {
         Map<String, LeaderQuestionBank> byId = questionBankRepo.findByQuestionIdIn(ids).stream()
                 .collect(Collectors.toMap(LeaderQuestionBank::getQuestionId, q -> q));
-        return ids.stream().map(id -> toQuestionDto(byId.get(id))).toList();
+        return ids.stream().map(id -> toQuestionDto(byId.get(id), sessionId)).toList();
     }
 
-    private QuestionDto toQuestionDto(LeaderQuestionBank q) {
-        char[] order = OptionOrder.displayOrder(q.getQuestionId());
+    private QuestionDto toQuestionDto(LeaderQuestionBank q, UUID sessionId) {
+        char[] order = OptionOrder.displayOrder(q.getQuestionId(), sessionId);
         QuestionDto dto = new QuestionDto();
         dto.setQuestionId(q.getQuestionId());
         dto.setText(q.getText());

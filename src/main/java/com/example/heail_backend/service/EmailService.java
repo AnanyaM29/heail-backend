@@ -22,15 +22,14 @@ import java.util.List;
 public class EmailService {
 
     private final JavaMailSender mailSender;
-    private final EmailKillSwitch killSwitch;
 
     @Value("${app.frontend.base-url}")
     private String frontendBaseUrl;
 
     @Async
     public void sendOtp(String toEmail, String otp) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendOtp");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendOtp — no recipient email");
             return;
         }
         try {
@@ -58,8 +57,8 @@ public class EmailService {
 
     @Async
     public void sendRegistrationOtp(String toEmail, String otp) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendRegistrationOtp");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendRegistrationOtp — no recipient email");
             return;
         }
         try {
@@ -86,8 +85,8 @@ public class EmailService {
 
     @Async
     public void sendAccountCreated(String toEmail, String name) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendAccountCreated");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendAccountCreated — no recipient email");
             return;
         }
         try {
@@ -114,8 +113,8 @@ public class EmailService {
 
     @Async
     public void sendPartnerOtp(String toEmail, String otp) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendPartnerOtp");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendPartnerOtp — no recipient email");
             return;
         }
         try {
@@ -142,8 +141,8 @@ public class EmailService {
 
     @Async
     public void sendProfileOtp(String toEmail, String otp, String reason) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendProfileOtp");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendProfileOtp — no recipient email");
             return;
         }
         try {
@@ -169,8 +168,8 @@ public class EmailService {
 
     @Async
     public void sendProfileUpdated(String toEmail) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendProfileUpdated");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendProfileUpdated — no recipient email");
             return;
         }
         try {
@@ -194,8 +193,8 @@ public class EmailService {
 
     @Async
     public void sendPasswordChanged(String toEmail) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendPasswordChanged");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendPasswordChanged — no recipient email");
             return;
         }
         try {
@@ -220,8 +219,8 @@ public class EmailService {
     @Async
     public void sendLeaderPaymentSuccess(String toEmail, String name, String amountDisplay, String receiptRef,
                                           byte[] invoicePdf, String invoiceNumber) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendLeaderPaymentSuccess");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendLeaderPaymentSuccess — no recipient email");
             return;
         }
         try {
@@ -254,8 +253,8 @@ public class EmailService {
 
     @Async
     public void sendLeaderResultsReady(String toEmail, String name) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendLeaderResultsReady");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendLeaderResultsReady — no recipient email");
             return;
         }
         try {
@@ -280,8 +279,8 @@ public class EmailService {
     @Async
     public void sendOrgPaymentSuccess(String toEmail, String adminName, String amountDisplay, int employeeCount,
                                        String receiptRef, byte[] invoicePdf, String invoiceNumber) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendOrgPaymentSuccess");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendOrgPaymentSuccess — no recipient email");
             return;
         }
         try {
@@ -314,8 +313,8 @@ public class EmailService {
 
     @Async
     public void sendEmployeeInvitation(String toEmail, String employeeName, String organisationName) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendEmployeeInvitation");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendEmployeeInvitation — no recipient email");
             return;
         }
         try {
@@ -345,8 +344,8 @@ public class EmailService {
     /* ── Employee reminder: hasn't started any Pulse yet (24h cadence) ── */
     @Async
     public void sendEmployeeReminderNotStarted(String toEmail, String employeeName, String organisationName) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendEmployeeReminderNotStarted");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendEmployeeReminderNotStarted — no recipient email");
             return;
         }
         try {
@@ -373,8 +372,8 @@ public class EmailService {
     /* ── Employee reminder: some Pulses done, some pending (12h cadence) ── */
     @Async
     public void sendEmployeeReminderPending(String toEmail, String employeeName, List<String> pendingPulseNames) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendEmployeeReminderPending");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendEmployeeReminderPending — no recipient email");
             return;
         }
         try {
@@ -403,8 +402,8 @@ public class EmailService {
     /* ── Org admin: list of employees who haven't started (day 3+) ── */
     @Async
     public void sendOrgNonStarterList(String toEmail, String adminName, List<String> nonStarterNames) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendOrgNonStarterList");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendOrgNonStarterList — no recipient email");
             return;
         }
         try {
@@ -434,8 +433,8 @@ public class EmailService {
     /* ── Org admin: detailed completion status (day 5+) ── */
     @Async
     public void sendOrgDetailedStatus(String toEmail, String adminName, int completed, int total) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendOrgDetailedStatus");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendOrgDetailedStatus — no recipient email");
             return;
         }
         try {
@@ -463,8 +462,8 @@ public class EmailService {
     /* ── Org admin: day-8 final notice (whether or not the report released) ── */
     @Async
     public void sendOrgDay8Final(String toEmail, String adminName, int completed, int total) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendOrgDay8Final");
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendOrgDay8Final — no recipient email");
             return;
         }
         try {
@@ -488,30 +487,87 @@ public class EmailService {
         }
     }
 
-    /* ── Org admin: report is ready ── */
+    /* ── Org admin: report is ready — full PDF attached, not just a pointer to the dashboard ── */
     @Async
-    public void sendOrgReportReleased(String toEmail, String adminName) {
-        if (!killSwitch.isEnabled()) {
-            log.info("Email sending disabled — skipped sendOrgReportReleased");
+    public void sendOrgReportReleased(String toEmail, String adminName, byte[] reportPdf) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendOrgReportReleased — no recipient email");
+            return;
+        }
+        try {
+            MimeMessage mime = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, true);
+            helper.setTo(toEmail);
+            helper.setSubject("Your HEAIL Diagnostic report is ready");
+            helper.setText("""
+                    Dear %s,
+
+                    Your organisation's HEAIL Diagnostic report — RAG status across all
+                    20 sections and each of the four Pulses — is ready, attached as a PDF,
+                    and also live on your dashboard: %s/dashboard.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(adminName, frontendBaseUrl));
+            if (reportPdf != null) {
+                helper.addAttachment("HEAIL-Diagnostic-Report.pdf", new ByteArrayResource(reportPdf));
+            }
+            mailSender.send(mime);
+        } catch (Exception e) {
+            log.error("Failed to send report-released email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendPaymentReminder(String toEmail, String name, String productLabel, String amountDisplay) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendPaymentReminder — no recipient email");
             return;
         }
         try {
             SimpleMailMessage msg = new SimpleMailMessage();
             msg.setTo(toEmail);
-            msg.setSubject("Your HEAIL Diagnostic report is ready");
+            msg.setSubject("HEAIL — Your payment is still pending");
             msg.setText("""
                     Dear %s,
 
-                    Your organisation's HEAIL Diagnostic report — RAG status across all
-                    20 sections and each of the four Pulses — is now live on your
-                    dashboard: %s/dashboard.
+                    We noticed your payment for %s (%s) hasn't been completed yet.
+                    Please sign in to complete your payment: %s/login
 
                     — Team HEAIL
                     contact@heail.in
-                    """.formatted(adminName, frontendBaseUrl));
+                    """.formatted(name, productLabel, amountDisplay, frontendBaseUrl));
             mailSender.send(msg);
         } catch (Exception e) {
-            log.error("Failed to send report-released email to {}: {}", toEmail, e.getMessage());
+            log.error("Failed to send payment reminder email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendInvoice(String toEmail, String name, String amountDisplay, byte[] invoicePdf, String invoiceNumber) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendInvoice — no recipient email");
+            return;
+        }
+        try {
+            MimeMessage mime = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, true);
+            helper.setTo(toEmail);
+            helper.setSubject("HEAIL — Your invoice " + invoiceNumber);
+            helper.setText("""
+                    Dear %s,
+
+                    As requested, please find attached your invoice %s for %s.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(name, invoiceNumber, amountDisplay));
+            if (invoicePdf != null) {
+                helper.addAttachment(invoiceNumber + ".pdf", new ByteArrayResource(invoicePdf));
+            }
+            mailSender.send(mime);
+        } catch (Exception e) {
+            log.error("Failed to send invoice email to {}: {}", toEmail, e.getMessage());
         }
     }
 

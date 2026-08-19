@@ -22,9 +22,10 @@ public class PartnerService {
     private final OtpTokenRepository otpRepo;
     private final PartnerApplicationRepository partnerRepo;
     private final EmailService emailService;
+    private final SmsService smsService;
 
     @Transactional
-    public void sendOtp(String email) {
+    public void sendOtp(String email, String mobile) {
         String emailLower = email.toLowerCase();
         otpRepo.invalidateAllByEmailAndPurpose(emailLower, PURPOSE);
 
@@ -39,6 +40,7 @@ public class PartnerService {
         otpRepo.save(token);
 
         emailService.sendPartnerOtp(email, otp);
+        smsService.sendOtp(mobile, otp);
     }
 
     /**

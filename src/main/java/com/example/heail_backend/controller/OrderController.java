@@ -1,9 +1,10 @@
 package com.example.heail_backend.controller;
 
 import com.example.heail_backend.dto.AcceptAgreementRequest;
-import com.example.heail_backend.dto.CapturePaypalOrderRequest;
+import com.example.heail_backend.dto.CreateOrderRequest;
 import com.example.heail_backend.dto.OrderDetailsRequest;
 import com.example.heail_backend.dto.OrderResponse;
+import com.example.heail_backend.dto.VerifyRazorpayPaymentRequest;
 import com.example.heail_backend.service.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,8 +27,8 @@ public class OrderController {
     private final OrderService orderService;
 
     @PostMapping
-    public ResponseEntity<OrderResponse> createOrGet(Authentication auth) {
-        return ResponseEntity.ok(orderService.getOrCreateDraftOrder(auth.getName()));
+    public ResponseEntity<OrderResponse> createOrGet(@RequestBody(required = false) CreateOrderRequest req, Authentication auth) {
+        return ResponseEntity.ok(orderService.getOrCreateDraftOrder(auth.getName(), req == null ? null : req.getCurrency()));
     }
 
     @GetMapping("/{id}")
@@ -49,15 +50,21 @@ public class OrderController {
         return ResponseEntity.ok(orderService.acceptAgreement(id, auth.getName(), req.getVersion()));
     }
 
-    @PostMapping("/{id}/create-paypal-order")
-    public ResponseEntity<OrderResponse> createPaypalOrder(@PathVariable UUID id, Authentication auth) {
-        return ResponseEntity.ok(orderService.createPaypalOrder(id, auth.getName()));
+    @PostMapping("/{id}/create-razorpay-order")
+    public ResponseEntity<OrderResponse> createRazorpayOrder(@PathVariable UUID id, Authentication auth) {
+        return ResponseEntity.ok(orderService.createRazorpayOrder(id, auth.getName()));
     }
 
-    @PostMapping("/{id}/capture-paypal-order")
-    public ResponseEntity<OrderResponse> capturePaypalOrder(@PathVariable UUID id,
-                                                              @Valid @RequestBody CapturePaypalOrderRequest req,
-                                                              Authentication auth) {
-        return ResponseEntity.ok(orderService.capturePaypalOrder(id, auth.getName(), req.getPaypalOrderId()));
+    @PostMapping("/{id}/verify-razorpay-payment")
+    public ResponseEntity<OrderResponse> verifyRazorpayPayment(@PathVariable UUID id,
+                                                                 @Valid @RequestBody VerifyRazorpayPaymentRequest req,
+                                                                 Authentication auth) {
+        return ResponseEntity.ok(orderService.verifyRazorpayPayment(id, auth.getName(),
+                req.getRazorpayOrderId(), req.getRazorpayPaymentId(), req.getRazorpaySignature()));
+    }
+
+    @PostMapping("/{id}/force-complete-test-payment")
+    public ResponseEntity<OrderResponse> forceCompleteTestPayment(@PathVariable UUID id, Authentication auth) {
+        return ResponseEntity.ok(orderService.forceCompleteTestPayment(id, auth.getName()));
     }
 }

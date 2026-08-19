@@ -44,6 +44,18 @@ public class User {
     @Column(name = "created_at", updatable = false)
     LocalDateTime createdAt;
 
+    @Column(name = "last_login_at")
+    LocalDateTime lastLoginAt;
+
+    @Column(nullable = false, columnDefinition = "boolean not null default true")
+    boolean active = true;
+
+    @Column(name = "blacklisted_at")
+    LocalDateTime blacklistedAt;
+
+    @Column(name = "deleted_at")
+    LocalDateTime deletedAt;
+
     @PrePersist
     void prePersist() { this.createdAt = LocalDateTime.now(); }
 }

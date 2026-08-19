@@ -29,6 +29,7 @@ public class OrgReportService {
     private final OrderRepository orderRepo;
     private final EmailService emailService;
     private final ScoringService scoringService;
+    private final OrgReportPdfService orgReportPdfService;
 
     /* ── Called after every Pulse submission and by the scheduled sweep. Scores are
        computed for fully-completed employees only, and released the moment either
@@ -74,7 +75,10 @@ public class OrgReportService {
 
         log.info("Report released for order {} ({} of {} employees fully completed)",
                 order.getId(), fullyCompleted.size(), orderEmployeeRepo.findByOrder(order).size());
-        emailService.sendOrgReportReleased(order.getUser().getEmail(), order.getUser().getName());
+
+        OrgReportResponse report = scoringService.computeReport(order, fullyCompleted);
+        byte[] reportPdf = orgReportPdfService.generate(report);
+        emailService.sendOrgReportReleased(order.getUser().getEmail(), order.getUser().getName(), reportPdf);
     }
 
     /* ── Employee×Pulse progress grid, never any scores ────────────── */

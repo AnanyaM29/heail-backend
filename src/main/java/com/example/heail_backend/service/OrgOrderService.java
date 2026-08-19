@@ -7,6 +7,7 @@ import com.example.heail_backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,8 +29,7 @@ public class OrgOrderService {
 
     private static final String SUITE_4PULSE_PRODUCT = "SUITE_4PULSE";
     private static final String ORG_PURCHASE_AGREEMENT = "ORG_ADMIN_PURCHASE";
-    // See OrderService — PayPal is the only live gateway and runs in USD end-to-end.
-    private static final String DEFAULT_CURRENCY = "USD";
+    private static final String INR_CURRENCY = "INR";
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
     private static final List<String> VALID_LEVELS = List.of("L", "MM", "E");
 
@@ -44,10 +44,15 @@ public class OrgOrderService {
     private final PasswordEncoder encoder;
     private final InvoiceService invoiceService;
     private final OrgReportService orgReportService;
-    private final PaypalService paypalService;
+    private final RazorpayService razorpayService;
 
-    @Value("${app.payments.paypal-enabled:true}")
-    private boolean paypalEnabled;
+    @Value("${app.payments.razorpay-enabled:false}")
+    private boolean razorpayEnabled;
+
+    /** Razorpay is the only gateway now, so every order is priced in INR regardless of what's requested. */
+    private String resolveCurrency(String requested, User user) {
+        return INR_CURRENCY;
+    }
 
     /**
      * Minimum sample size required on the employee-upload step, driven by the
@@ -65,8 +70,15 @@ public class OrgOrderService {
 
     /* ── Get the org admin's open order, or start a new one ──────── */
     @Transactional
-    public OrgOrderResponse getOrCreateDraftOrder(String email) {
+    public OrgOrderResponse getOrCreateDraftOrder(String email, String requestedCurrency) {
         User user = requireUser(email);
+        // Employee/respondent accounts are added to a roster by an org admin — they
+        // never buy or run their own organisation round themselves. Everyone else
+        // (a fresh account, a Leader customer, an existing org admin, superadmin)
+        // can, mirroring the rest of this class's isAuthenticated()-only gating.
+        if ("EMPLOYEE".equals(user.getRole()))
+            throw new AccessDeniedException("Employee accounts can't purchase an organisation round — ask your org admin.");
+        String currency = resolveCurrency(requestedCurrency, user);
         List<Order> existing = orderRepo.findByUserAndProductCodeOrderByDraftAtDesc(user, SUITE_4PULSE_PRODUCT);
         Order latest = existing.isEmpty() ? null : existing.get(0);
 
@@ -76,14 +88,29 @@ public class OrgOrderService {
         // reusing it just gets the caller permanently stuck. Start fresh instead.
         boolean reusable = latest != null && latest.getStatus() == OrderStatus.DRAFT;
 
-        if (reusable) return toOrgResponse(latest);
+        if (reusable && currency.equals(latest.getCurrency())) return toOrgResponse(latest);
+
+        if (reusable) {
+            // Buyer switched gateways before paying — re-price the same employee count
+            // (if any) under the new currency instead of leaving a stale draft.
+            int employeeCount = orderEmployeeRepo.findByOrder(latest).size();
+            latest.setCurrency(currency);
+            if (employeeCount > 0) {
+                repriceForEmployeeCount(latest, employeeCount);
+            } else {
+                latest.setAmount(BigDecimal.ZERO);
+                latest.setGstAmount(BigDecimal.ZERO);
+            }
+            Order saved = orderRepo.save(latest);
+            return toOrgResponse(saved);
+        }
 
         Order order = new Order();
         order.setUser(user);
         order.setProductCode(SUITE_4PULSE_PRODUCT);
         order.setAmount(BigDecimal.ZERO);
         order.setGstAmount(BigDecimal.ZERO);
-        order.setCurrency(DEFAULT_CURRENCY);
+        order.setCurrency(currency);
         order.setStatus(OrderStatus.DRAFT);
         order = orderRepo.save(order);
         return toOrgResponse(order);
@@ -162,17 +189,21 @@ public class OrgOrderService {
         }
         orderEmployeeRepo.saveAll(employees);
 
-        PricingItem pricing = pricingRepo.findByProductCodeAndCurrencyAndActiveTrue(SUITE_4PULSE_PRODUCT, DEFAULT_CURRENCY)
-                .orElseThrow(() -> new IllegalStateException("No active price configured for " + SUITE_4PULSE_PRODUCT));
-
-        BigDecimal amount = pricing.getAmount().multiply(BigDecimal.valueOf(employees.size()));
-        BigDecimal gstAmount = amount.multiply(pricing.getGstPct()).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-        order.setCurrency(pricing.getCurrency());
-        order.setAmount(amount);
-        order.setGstAmount(gstAmount);
+        repriceForEmployeeCount(order, employees.size());
         order = orderRepo.save(order);
 
         return toOrgResponse(order);
+    }
+
+    /** Recomputes amount/GST for the order's current currency and a given employee count. */
+    private void repriceForEmployeeCount(Order order, int employeeCount) {
+        PricingItem pricing = pricingRepo.findByProductCodeAndCurrencyAndActiveTrue(SUITE_4PULSE_PRODUCT, order.getCurrency())
+                .orElseThrow(() -> new IllegalStateException("No active price configured for " + SUITE_4PULSE_PRODUCT + " in " + order.getCurrency()));
+
+        BigDecimal amount = pricing.getAmount().multiply(BigDecimal.valueOf(employeeCount));
+        BigDecimal gstAmount = amount.multiply(pricing.getGstPct()).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        order.setAmount(amount);
+        order.setGstAmount(gstAmount);
     }
 
     /**
@@ -182,6 +213,11 @@ public class OrgOrderService {
      * last step before the agreement/payment screens. First call creates the
      * Organisation and promotes the account to ORG_ADMIN; later calls on the
      * same draft order just update it (e.g. fixing a typo before paying).
+     *
+     * The promotion only applies to a plain self-registered LEADER — a
+     * SUPERADMIN walking through this flow to set a round up on a client's
+     * behalf must keep their SUPERADMIN role (the single-role-column design
+     * means overwriting it here would silently lock them out of /admin).
      */
     @Transactional
     public OrgOrderResponse setOrgDetails(UUID orderId, String email, String organisationName,
@@ -207,7 +243,7 @@ public class OrgOrderService {
 
         if (isNew) {
             user.setOrganisation(organisation);
-            user.setRole("ORG_ADMIN");
+            if ("LEADER".equals(user.getRole())) user.setRole("ORG_ADMIN");
             userRepo.save(user);
         }
 
@@ -236,68 +272,86 @@ public class OrgOrderService {
         return toOrgResponse(order);
     }
 
-    /* ── Create a real PayPal order once the agreement is accepted ── */
+    /* ── Create a real Razorpay order once the agreement is accepted ── */
     @Transactional
-    public OrgOrderResponse createPaypalOrder(UUID orderId, String email) {
+    public OrgOrderResponse createRazorpayOrder(UUID orderId, String email) {
         Order order = requireOwnedOrder(orderId, email);
         if (order.getStatus() != OrderStatus.AGREEMENT_ACCEPTED)
             throw new IllegalArgumentException("Accept the agreement before paying");
 
-        if (!paypalEnabled) {
-            log.warn("PayPal disabled — completing order {} without a real payment", order.getId());
+        if (!razorpayEnabled) {
+            log.warn("Razorpay disabled — completing order {} without a real payment", order.getId());
             markPaidFromGateway(order, null);
             return toOrgResponse(order);
         }
 
         BigDecimal total = order.getAmount().add(order.getGstAmount());
-        String paypalOrderId = paypalService.createOrder(total, order.getCurrency(), order.getId().toString());
+        String razorpayOrderId = razorpayService.createOrder(total, order.getCurrency(), order.getId().toString());
 
         order.setStatus(OrderStatus.PAYMENT_INITIATED);
         order.setPaymentInitiatedAt(LocalDateTime.now());
-        order.setGatewayOrderRef(paypalOrderId);
+        order.setGatewayOrderRef(razorpayOrderId);
         order = orderRepo.save(order);
 
         return toOrgResponse(order);
     }
 
-    /* ── Capture the PayPal order once the buyer approves it client-side ── */
+    /* ── Verify the Razorpay payment signature Checkout.js hands back client-side ── */
     @Transactional
-    public OrgOrderResponse capturePaypalOrder(UUID orderId, String email, String paypalOrderId) {
+    public OrgOrderResponse verifyRazorpayPayment(UUID orderId, String email, String razorpayOrderId,
+                                                   String razorpayPaymentId, String razorpaySignature) {
         Order order = requireOwnedOrder(orderId, email);
         if (order.getStatus() == OrderStatus.PAID) return toOrgResponse(order); // already fulfilled, e.g. by the webhook
 
-        if (order.getStatus() != OrderStatus.PAYMENT_INITIATED || !paypalOrderId.equals(order.getGatewayOrderRef()))
+        if (order.getStatus() != OrderStatus.PAYMENT_INITIATED || !razorpayOrderId.equals(order.getGatewayOrderRef()))
             throw new IllegalArgumentException("No matching payment in progress for this order");
 
-        PaypalService.PaypalCaptureResult result = paypalService.captureOrder(paypalOrderId);
-        if (!result.completed()) {
+        if (!razorpayService.verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature)) {
             order.setStatus(OrderStatus.FAILED);
             orderRepo.save(order);
-            throw new IllegalStateException("Payment was not completed (status: " + result.status() + ")");
+            throw new IllegalStateException("Payment signature verification failed");
         }
 
-        markPaidFromGateway(order, result.captureId());
+        markPaidFromGateway(order, razorpayPaymentId);
+        return toOrgResponse(order);
+    }
+
+    /**
+     * Test-mode-only shortcut: completes the order without a real payment when the
+     * caller just closes the Razorpay checkout overlay instead of paying. Gated on
+     * the configured Razorpay key actually being a test key (rzp_test_*), so this
+     * can never fire once the app is reconfigured with a live key for production.
+     */
+    @Transactional
+    public OrgOrderResponse forceCompleteTestPayment(UUID orderId, String email) {
+        Order order = requireOwnedOrder(orderId, email);
+        if (!razorpayService.isTestMode())
+            throw new IllegalStateException("Live payments are enabled — this isn't available");
+        if (order.getStatus() != OrderStatus.PAYMENT_INITIATED)
+            throw new IllegalArgumentException("No payment in progress for this order");
+
+        markPaidFromGateway(order, null);
         return toOrgResponse(order);
     }
 
     /**
      * Idempotent fulfilment — shared by the capture endpoint (immediate UX) and the
-     * PayPal webhook (source of truth per spec §4A). Whichever arrives first does the
+     * Razorpay webhook (source of truth per spec §4A). Whichever arrives first does the
      * work; the second call is a no-op.
      *
-     * Note: gatewayOrderRef is deliberately left holding the PayPal *order* ID (set at
-     * createPaypalOrder time), not overwritten with the capture ID — the webhook looks
+     * Note: gatewayOrderRef is deliberately left holding the Razorpay *order* ID (set at
+     * createRazorpayOrder time), not overwritten with the payment ID — the webhook looks
      * orders up by that field, and if this ran first it must stay lookup-able for the
      * webhook (or vice versa) regardless of which arrives first.
      */
     @Transactional
-    public void markPaidFromGateway(Order order, String captureId) {
+    public void markPaidFromGateway(Order order, String paymentId) {
         if (order.getStatus() == OrderStatus.PAID) return;
 
         order.setStatus(OrderStatus.PAID);
-        if (captureId != null) {
+        if (paymentId != null) {
             Map<String, String> metadata = order.getMetadata() != null ? new HashMap<>(order.getMetadata()) : new HashMap<>();
-            metadata.put("paypalCaptureId", captureId);
+            metadata.put("razorpayPaymentId", paymentId);
             order.setMetadata(metadata);
         }
         order.setPaidAt(LocalDateTime.now());
@@ -433,6 +487,7 @@ public class OrgOrderService {
         res.setPaidAt(order.getPaidAt());
         res.setCreatedAt(order.getDraftAt());
         res.setMetadata(order.getMetadata());
+        res.setRazorpayKeyId(razorpayService.getKeyId());
         return res;
     }
 

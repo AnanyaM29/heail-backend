@@ -4,7 +4,7 @@ import com.example.heail_backend.entity.Order;
 import com.example.heail_backend.repository.OrderRepository;
 import com.example.heail_backend.service.OrderService;
 import com.example.heail_backend.service.OrgOrderService;
-import com.example.heail_backend.service.PaypalService;
+import com.example.heail_backend.service.RazorpayService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Optional;
 
 /**
- * PayPal webhook — per spec §4A, "the webhook, never the redirect, is the source of
+ * Razorpay webhook — per spec §4A, "the webhook, never the redirect, is the source of
  * truth." This runs the same idempotent fulfilment as the capture-confirm endpoint,
  * so whichever arrives first does the work and the other is a no-op.
  */
@@ -30,7 +30,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class PaymentWebhookController {
 
-    private final PaypalService paypalService;
+    private final RazorpayService razorpayService;
     private final OrderRepository orderRepo;
     private final OrderService orderService;
     private final OrgOrderService orgOrderService;
@@ -38,55 +38,56 @@ public class PaymentWebhookController {
 
     private static final String LEADER_CLASSIC_PRODUCT = "LEADER_CLASSIC";
 
-    @PostMapping("/paypal")
-    public ResponseEntity<String> paypalWebhook(@RequestHeader HttpHeaders headers, @RequestBody String rawBody) {
-        if (!paypalService.verifyWebhookSignature(headers, rawBody)) {
-            log.error("Rejected PayPal webhook: signature verification failed");
+    @PostMapping("/razorpay")
+    public ResponseEntity<String> razorpayWebhook(@RequestHeader HttpHeaders headers, @RequestBody String rawBody) {
+        String signature = headers.getFirst("x-razorpay-signature");
+        if (!razorpayService.verifyWebhookSignature(rawBody, signature)) {
+            log.error("Rejected Razorpay webhook: signature verification failed");
             return ResponseEntity.status(400).body("invalid signature");
         }
 
         try {
             JsonNode event = mapper.readTree(rawBody);
-            String eventType = event.path("event_type").asText();
-            JsonNode resource = event.path("resource");
+            String eventType = event.path("event").asText();
+            JsonNode payment = event.path("payload").path("payment").path("entity");
 
             switch (eventType) {
-                case "PAYMENT.CAPTURE.COMPLETED" -> {
-                    String paypalOrderId = resource.path("supplementary_data").path("related_ids").path("order_id").asText(null);
-                    String captureId = resource.path("id").asText(null);
-                    handleCaptured(paypalOrderId, captureId);
+                case "payment.captured" -> {
+                    String razorpayOrderId = payment.path("order_id").asText(null);
+                    String paymentId = payment.path("id").asText(null);
+                    handleCaptured(razorpayOrderId, paymentId);
                 }
-                case "PAYMENT.CAPTURE.DENIED" -> {
-                    String paypalOrderId = resource.path("supplementary_data").path("related_ids").path("order_id").asText(null);
-                    handleDenied(paypalOrderId);
+                case "payment.failed" -> {
+                    String razorpayOrderId = payment.path("order_id").asText(null);
+                    handleDenied(razorpayOrderId);
                 }
-                default -> log.info("Ignoring PayPal webhook event type: {}", eventType);
+                default -> log.info("Ignoring Razorpay webhook event type: {}", eventType);
             }
             return ResponseEntity.ok("ok");
         } catch (Exception e) {
-            log.error("Failed to process PayPal webhook: {}", e.getMessage());
+            log.error("Failed to process Razorpay webhook: {}", e.getMessage());
             return ResponseEntity.status(400).body("bad payload");
         }
     }
 
-    private void handleCaptured(String paypalOrderId, String captureId) {
-        if (paypalOrderId == null) return;
-        Optional<Order> orderOpt = orderRepo.findByGatewayOrderRef(paypalOrderId);
+    private void handleCaptured(String razorpayOrderId, String paymentId) {
+        if (razorpayOrderId == null) return;
+        Optional<Order> orderOpt = orderRepo.findByGatewayOrderRef(razorpayOrderId);
         if (orderOpt.isEmpty()) {
-            log.warn("PayPal webhook: no order found for PayPal order id {}", paypalOrderId);
+            log.warn("Razorpay webhook: no order found for order id {}", razorpayOrderId);
             return;
         }
         Order order = orderOpt.get();
         if (LEADER_CLASSIC_PRODUCT.equals(order.getProductCode())) {
-            orderService.markPaidFromGateway(order, captureId);
+            orderService.markPaidFromGateway(order, paymentId);
         } else {
-            orgOrderService.markPaidFromGateway(order, captureId);
+            orgOrderService.markPaidFromGateway(order, paymentId);
         }
     }
 
-    private void handleDenied(String paypalOrderId) {
-        if (paypalOrderId == null) return;
-        Optional<Order> orderOpt = orderRepo.findByGatewayOrderRef(paypalOrderId);
+    private void handleDenied(String razorpayOrderId) {
+        if (razorpayOrderId == null) return;
+        Optional<Order> orderOpt = orderRepo.findByGatewayOrderRef(razorpayOrderId);
         if (orderOpt.isEmpty()) return;
         Order order = orderOpt.get();
         if (LEADER_CLASSIC_PRODUCT.equals(order.getProductCode())) {

@@ -24,6 +24,11 @@ public class DashboardResponse {
     /** The caller's own in-progress LEADER_CLASSIC session, if any. */
     SessionResumeResponse leaderInProgress;
 
+    /** True if the caller has a LEADER_CLASSIC order that hasn't been paid for yet
+     *  (DRAFT/AGREEMENT_ACCEPTED/PAYMENT_INITIATED) — lets the dashboard surface a
+     *  "complete payment" prompt even before any assessment session exists. */
+    boolean leaderUnpaidOrder;
+
     /** Every organisation's pulse round the caller has been invited into as a
      *  respondent (their own org and/or any other org that added them by email). */
     List<RespondentMembershipDto> respondentMemberships;

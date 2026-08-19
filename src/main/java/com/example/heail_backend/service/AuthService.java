@@ -23,10 +23,11 @@ public class AuthService {
     private final PasswordEncoder        encoder;
     private final JwtService             jwtService;
     private final EmailService           emailService;
+    private final SmsService             smsService;
 
-    /* ── REGISTER: SEND EMAIL VERIFICATION CODE ───────────────────── */
+    /* ── REGISTER: SEND EMAIL + SMS VERIFICATION CODE ──────────────── */
     @Transactional
-    public void sendRegistrationOtp(ForgotPasswordRequest req) {
+    public void sendRegistrationOtp(RegisterOtpRequest req) {
         String email = req.getEmail().toLowerCase();
         if (userRepo.existsByEmail(email))
             throw new IllegalArgumentException("Email already registered");
@@ -43,6 +44,7 @@ public class AuthService {
         otpRepo.save(otpToken);
 
         emailService.sendRegistrationOtp(req.getEmail(), otp);
+        smsService.sendOtp(req.getMobile(), otp);
     }
 
     /* ── REGISTER ──────────────────────────────────────────────── */
@@ -97,6 +99,12 @@ public class AuthService {
         if (!encoder.matches(req.getPassword(), user.getPasswordHash()))
             throw new IllegalArgumentException("Invalid email or password");
 
+        if (!user.isActive() || user.getDeletedAt() != null)
+            throw new IllegalArgumentException("This account is no longer active");
+
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepo.save(user);
+
         return buildAuthResponse(user);
     }
 
@@ -115,7 +123,11 @@ public class AuthService {
         rt.setRevoked(true);
         refreshRepo.save(rt);
 
-        return buildAuthResponse(rt.getUser());
+        User user = rt.getUser();
+        if (!user.isActive() || user.getDeletedAt() != null)
+            throw new IllegalArgumentException("This account is no longer active");
+
+        return buildAuthResponse(user);
     }
 
     /* ── FORGOT PASSWORD ───────────────────────────────────────── */

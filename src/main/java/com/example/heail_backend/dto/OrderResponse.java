@@ -22,4 +22,7 @@ public class OrderResponse {
     LocalDateTime paidAt;
     LocalDateTime createdAt;
     Map<String, String> metadata;
+    // Public by design — only razorpay.key-secret is sensitive. Included here so
+    // the frontend doesn't need its own separately-configured copy to open Checkout.js.
+    String razorpayKeyId;
 }

@@ -10,6 +10,7 @@ import com.example.heail_backend.entity.SessionStatus;
 import com.example.heail_backend.entity.User;
 import com.example.heail_backend.repository.AssessmentSessionRepository;
 import com.example.heail_backend.repository.OrderEmployeeRepository;
+import com.example.heail_backend.repository.OrderRepository;
 import com.example.heail_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,10 +34,12 @@ public class DashboardService {
 
     private static final List<String> PULSE_SEQUENCE =
             List.of("LEADER_PULSE", "TALENT_PULSE", "SYSTEM_PULSE", "GROWTH_PULSE");
+    private static final String LEADER_CLASSIC_PRODUCT = "LEADER_CLASSIC";
 
     private final UserRepository userRepo;
     private final OrderEmployeeRepository orderEmployeeRepo;
     private final AssessmentSessionRepository sessionRepo;
+    private final OrderRepository orderRepo;
     private final OrgOrderService orgOrderService;
     private final AssessmentService assessmentService;
 
@@ -64,6 +67,10 @@ public class DashboardService {
         // Individual Leader activity — completed attempts and any session in progress.
         res.setLeaderResults(assessmentService.listResults(email));
         res.setLeaderInProgress(assessmentService.current(email).orElse(null));
+
+        List<Order> leaderOrders = orderRepo.findByUserAndProductCodeOrderByDraftAtDesc(user, LEADER_CLASSIC_PRODUCT);
+        res.setLeaderUnpaidOrder(!leaderOrders.isEmpty() && leaderOrders.get(0).getStatus() != OrderStatus.PAID
+                && leaderOrders.get(0).getStatus() != OrderStatus.ABANDONED && leaderOrders.get(0).getStatus() != OrderStatus.FAILED);
 
         // Respondent activity — every org's pulse round this person was invited into,
         // whether as an employee of their own org or added by a different one.
