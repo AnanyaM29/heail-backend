@@ -38,6 +38,7 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // Public partner-application form — no account required to apply.
                 .requestMatchers("/api/v1/partners/**").permitAll()
@@ -46,6 +47,7 @@ public class SecurityConfig {
                 // is verified inside PaymentWebhookController via each gateway's own
                 // signature check, not Spring Security.
                 .requestMatchers("/api/v1/webhooks/**").permitAll()
+                    .requestMatchers("/actuator/health").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
