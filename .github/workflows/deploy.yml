@@ -1,0 +1,42 @@
+name: Deploy Heail
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            echo "=== Pulling backend ==="
+            cd ~/heail/heail-backend
+            git checkout dev
+            git pull origin dev
+
+            echo "=== Pulling frontend ==="
+            cd ~/heail/heail-frontend
+            git checkout dev
+            git pull origin dev
+
+            echo "=== Building Docker images ==="
+            cd ~/heail
+            docker compose build backend frontend
+
+            echo "=== Restarting application ==="
+            docker compose up -d
+
+            echo "=== Checking containers ==="
+            docker compose ps
+
+            echo "=== Deployment complete ==="
