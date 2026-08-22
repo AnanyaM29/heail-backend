@@ -4,7 +4,6 @@ import com.example.heail_backend.dto.AdminPartnerDto;
 import com.example.heail_backend.dto.AdminPaymentDto;
 import com.example.heail_backend.dto.AdminTestSessionDto;
 import com.example.heail_backend.dto.AdminUserDto;
-import com.example.heail_backend.entity.PartnerApplication;
 import com.example.heail_backend.service.AdminDashboardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
@@ -122,14 +121,13 @@ public class AdminDashboardController {
 
     @GetMapping("/partners/{id}/resume")
     public ResponseEntity<byte[]> partnerResume(@PathVariable UUID id) {
-        PartnerApplication application = adminDashboardService.getPartnerResume(id);
-        String filename = application.getResumeFileName() != null ? application.getResumeFileName() : "resume";
-        String contentType = URLConnection.guessContentTypeFromName(filename);
+        AdminDashboardService.PartnerResumeFile resume = adminDashboardService.getPartnerResume(id);
+        String contentType = URLConnection.guessContentTypeFromName(resume.filename());
 
         return ResponseEntity.ok()
                 .contentType(contentType != null ? MediaType.parseMediaType(contentType) : MediaType.APPLICATION_OCTET_STREAM)
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        ContentDisposition.attachment().filename(filename).build().toString())
-                .body(application.getResumeData());
+                        ContentDisposition.attachment().filename(resume.filename()).build().toString())
+                .body(resume.data());
     }
 }

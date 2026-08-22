@@ -20,6 +20,7 @@ import com.example.heail_backend.repository.RefreshTokenRepository;
 import com.example.heail_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -196,37 +197,49 @@ public class AdminDashboardService {
     /* ── Partner applications ─────────────────────────────────────── */
     @Transactional(readOnly = true)
     public List<AdminPartnerDto> listPartners() {
-        return partnerRepo.findAllByOrderByCreatedAtDesc().stream()
-                .map(this::toPartnerDto).toList();
+        return partnerRepo.listSummaries();
     }
 
+    /**
+     * Reads the resume bytes out to a plain record while the transaction (and
+     * therefore the JDBC connection the lob stream is tied to) is still open.
+     * Returning the entity itself and letting the controller call
+     * getResumeData() afterward throws "Unable to access lob stream" — Postgres
+     * stores this byte[] as a large object (oid), which can only be streamed
+     * within the transaction/connection that fetched it.
+     *
+     * Separately: a handful of older rows point at a large object that no
+     * longer exists in pg_largeobject (likely lost in a dump/restore that
+     * didn't carry blobs across) — Hibernate surfaces that as a
+     * JpaSystemException("Unable to access lob stream") wrapping a Postgres
+     * "large object ... does not exist" error. That's a missing file, not a
+     * server error, so it's translated into the same "no resume on file"
+     * response the frontend already handles instead of a raw 500.
+     */
     @Transactional(readOnly = true)
-    public PartnerApplication getPartnerResume(UUID id) {
-        PartnerApplication application = partnerRepo.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Partner application not found"));
-        if (application.getResumeData() == null)
+    public PartnerResumeFile getPartnerResume(UUID id) {
+        PartnerApplication application;
+        byte[] data;
+        try {
+            application = partnerRepo.findById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Partner application not found"));
+            data = application.getResumeData();
+        } catch (JpaSystemException e) {
+            log.warn("Resume data unreadable for partner application {} (likely a missing large object): {}", id, e.getMessage());
+            throw new IllegalArgumentException("This application's resume file is missing from storage");
+        }
+        if (data == null)
             throw new IllegalArgumentException("This application has no resume on file");
-        return application;
+
+        String filename = application.getResumeFileName() != null ? application.getResumeFileName() : "resume";
+        return new PartnerResumeFile(data, filename);
     }
+
+    public record PartnerResumeFile(byte[] data, String filename) {}
 
     private User requireUser(UUID userId) {
         return userRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
-    }
-
-    private AdminPartnerDto toPartnerDto(PartnerApplication application) {
-        AdminPartnerDto dto = new AdminPartnerDto();
-        dto.setId(application.getId());
-        dto.setName(application.getName());
-        dto.setCountry(application.getCountry());
-        dto.setCity(application.getCity());
-        dto.setMobile(application.getMobile());
-        dto.setEmail(application.getEmail());
-        dto.setConsentGiven(application.isConsentGiven());
-        dto.setResumeFileName(application.getResumeFileName());
-        dto.setHasResume(application.getResumeData() != null);
-        dto.setCreatedAt(application.getCreatedAt());
-        return dto;
     }
 
     @Transactional(readOnly = true)
