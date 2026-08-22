@@ -34,7 +34,8 @@ jobs:
             docker compose build backend frontend
 
             echo "=== Restarting application ==="
-            docker compose up -d
+            docker compose down --remove-orphans
+            docker compose up -d --force-recreate
 
             echo "=== Checking containers ==="
             docker compose ps
