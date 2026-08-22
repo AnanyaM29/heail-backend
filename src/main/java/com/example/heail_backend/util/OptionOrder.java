@@ -22,9 +22,19 @@ import java.util.UUID;
 public final class OptionOrder {
     private OptionOrder() {}
 
+    private static final int DEFAULT_OPTION_COUNT = 4;
+
     /** order[i] = the ORIGINAL letter (A/B/C/D) shown in display slot i (0=A, 1=B, 2=C, 3=D). */
     public static char[] displayOrder(String questionId, UUID sessionId) {
-        char[] order = {'A', 'B', 'C', 'D'};
+        return displayOrder(questionId, sessionId, DEFAULT_OPTION_COUNT);
+    }
+
+    /** Same contract as {@link #displayOrder(String, UUID)}, generalized to any option count
+     *  (e.g. 5 for the A-E HR competency question bank). Still seeded purely by
+     *  (questionId, sessionId), so it stays deterministic and stable within a session. */
+    public static char[] displayOrder(String questionId, UUID sessionId, int optionCount) {
+        char[] order = new char[optionCount];
+        for (int i = 0; i < optionCount; i++) order[i] = (char) ('A' + i);
         long seed = (long) questionId.hashCode() * 31 + sessionId.hashCode();
         Random r = new Random(seed);
         for (int i = order.length - 1; i > 0; i--) {
@@ -38,7 +48,12 @@ public final class OptionOrder {
 
     /** Given the letter the client displayed/selected (e.g. 'B'), returns the original A/B/C/D letter it represents. */
     public static char toOriginal(String questionId, UUID sessionId, char displayedLetter) {
-        char[] order = displayOrder(questionId, sessionId);
+        return toOriginal(questionId, sessionId, displayedLetter, DEFAULT_OPTION_COUNT);
+    }
+
+    /** Generalized to any option count — see {@link #displayOrder(String, UUID, int)}. */
+    public static char toOriginal(String questionId, UUID sessionId, char displayedLetter, int optionCount) {
+        char[] order = displayOrder(questionId, sessionId, optionCount);
         int slot = displayedLetter - 'A';
         if (slot < 0 || slot >= order.length)
             throw new IllegalArgumentException("Invalid option: " + displayedLetter);

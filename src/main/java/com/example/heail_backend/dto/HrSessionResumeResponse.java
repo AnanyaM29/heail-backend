@@ -1,0 +1,20 @@
+package com.example.heail_backend.dto;
+
+import lombok.Data;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+@Data
+public class HrSessionResumeResponse {
+    UUID sessionId;
+    short assessmentId;
+    String assessmentName;
+    int attemptNumber;
+    String status;
+    List<HrQuestionDto> questions;
+    Map<String, String> answeredOptions;
+    LocalDateTime deadlineAt;
+}

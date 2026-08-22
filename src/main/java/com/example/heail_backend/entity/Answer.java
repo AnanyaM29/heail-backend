@@ -21,7 +21,9 @@ public class Answer {
     @JoinColumn(name = "session_id", nullable = false)
     AssessmentSession session;
 
-    @Column(name = "question_id", nullable = false, length = 12)
+    // Widened from 12 to 40 for HR competency-bank item IDs (e.g.
+    // "ITEM-MCQ-0TO2-REF-011", up to 22 chars) — matches hr_question_bank.question_id.
+    @Column(name = "question_id", nullable = false, length = 40)
     String questionId;
 
     @Column(name = "selected_option", nullable = false, length = 1)

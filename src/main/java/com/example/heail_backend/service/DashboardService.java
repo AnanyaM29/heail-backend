@@ -42,6 +42,7 @@ public class DashboardService {
     private final OrderRepository orderRepo;
     private final OrgOrderService orgOrderService;
     private final AssessmentService assessmentService;
+    private final HrAssessmentService hrAssessmentService;
 
     @Transactional(readOnly = true)
     public DashboardResponse getDashboard(String email) {
@@ -79,6 +80,11 @@ public class DashboardService {
                         .map(this::toMembership)
                         .toList()
         );
+
+        // HR Competency Assessment — all 7 pillars, whichever have activity.
+        res.setHrAssessments(hrAssessmentService.listAssessments(email));
+        res.setHrResults(hrAssessmentService.listResults(email));
+        res.setHrInProgress(hrAssessmentService.listInProgress(email));
 
         return res;
     }

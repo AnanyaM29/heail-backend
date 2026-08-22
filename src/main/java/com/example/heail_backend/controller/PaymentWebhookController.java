@@ -2,6 +2,7 @@ package com.example.heail_backend.controller;
 
 import com.example.heail_backend.entity.Order;
 import com.example.heail_backend.repository.OrderRepository;
+import com.example.heail_backend.service.HrOrderService;
 import com.example.heail_backend.service.OrderService;
 import com.example.heail_backend.service.OrgOrderService;
 import com.example.heail_backend.service.RazorpayService;
@@ -34,9 +35,11 @@ public class PaymentWebhookController {
     private final OrderRepository orderRepo;
     private final OrderService orderService;
     private final OrgOrderService orgOrderService;
+    private final HrOrderService hrOrderService;
     private final ObjectMapper mapper = new ObjectMapper();
 
     private static final String LEADER_CLASSIC_PRODUCT = "LEADER_CLASSIC";
+    private static final String HR_SUITE_PRODUCT = "HR_SUITE";
 
     @PostMapping("/razorpay")
     public ResponseEntity<String> razorpayWebhook(@RequestHeader HttpHeaders headers, @RequestBody String rawBody) {
@@ -80,6 +83,8 @@ public class PaymentWebhookController {
         Order order = orderOpt.get();
         if (LEADER_CLASSIC_PRODUCT.equals(order.getProductCode())) {
             orderService.markPaidFromGateway(order, paymentId);
+        } else if (HR_SUITE_PRODUCT.equals(order.getProductCode())) {
+            hrOrderService.markPaidFromGateway(order, paymentId);
         } else {
             orgOrderService.markPaidFromGateway(order, paymentId);
         }
@@ -92,6 +97,8 @@ public class PaymentWebhookController {
         Order order = orderOpt.get();
         if (LEADER_CLASSIC_PRODUCT.equals(order.getProductCode())) {
             orderService.markFailedFromGateway(order);
+        } else if (HR_SUITE_PRODUCT.equals(order.getProductCode())) {
+            hrOrderService.markFailedFromGateway(order);
         } else {
             orgOrderService.markFailedFromGateway(order);
         }

@@ -16,6 +16,7 @@ public interface AssessmentSessionRepository extends JpaRepository<AssessmentSes
     Optional<AssessmentSession> findFirstByUserAndProductCodeAndStatusOrderByStartedAtDesc(
             User user, String productCode, SessionStatus status);
     List<AssessmentSession> findByUserAndOrderAndPulse(User user, Order order, String pulse);
+    List<AssessmentSession> findByUserAndStatusAndProductCodeStartingWith(User user, SessionStatus status, String productCodePrefix);
     List<AssessmentSession> findByOrderAndStatus(Order order, SessionStatus status);
     List<AssessmentSession> findByStartedAtAfterOrderByStartedAtDesc(LocalDateTime cutoff);
 }

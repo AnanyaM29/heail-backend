@@ -96,6 +96,7 @@ public class InvoiceService {
         return switch (productCode) {
             case "LEADER_CLASSIC" -> "The Gita Leader — Classic Assessment";
             case "SUITE_4PULSE" -> "Organisational Transformation Diagnostic — 4-Pulse Suite";
+            case "HR_SUITE" -> "HR Competency Assessment";
             default -> productCode;
         };
     }

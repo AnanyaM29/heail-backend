@@ -1,0 +1,405 @@
+package com.example.heail_backend.service;
+
+import com.example.heail_backend.dto.*;
+import com.example.heail_backend.entity.*;
+import com.example.heail_backend.repository.*;
+import com.example.heail_backend.util.OptionOrder;
+import com.example.heail_backend.util.SessionTimer;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * The HR Competency Assessment flow — 7 pillars, each a 30-question draw
+ * stratified across that pillar's competencies. Modeled directly on
+ * AssessmentService (entitlement → build questionIds → shuffle → score →
+ * save result) and PulseAssessmentService's generateQuestionIds (stratified
+ * sampling with a fill-the-remainder step), reusing the same generic
+ * assessment_session/answers/entitlements tables Leader and Pulse already
+ * share — see AssessmentSession/Answer/Entitlement for why those are
+ * deliberately generic.
+ *
+ * One entitlement per pillar: product codes are "HR_A1".."HR_A7" (see
+ * productCodeFor/assessmentIdFromProductCode). Individual self-serve only —
+ * no org-bulk purchase flow in this pass.
+ */
+@Service
+@RequiredArgsConstructor
+public class HrAssessmentService {
+
+    private static final String PRODUCT_PREFIX = "HR_A";
+    private static final int HR_OPTION_COUNT = 5;
+
+    private final EntitlementRepository entitlementRepo;
+    private final AssessmentSessionRepository sessionRepo;
+    private final AnswerRepository answerRepo;
+    private final HrAssessmentRepository hrAssessmentRepo;
+    private final HrSkillCategoryRepository hrSkillCategoryRepo;
+    private final HrCompetencyRepository hrCompetencyRepo;
+    private final HrQuestionBankRepository hrQuestionBankRepo;
+    private final HrResultRepository hrResultRepo;
+    private final UserRepository userRepo;
+
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    /* ── The 7 pillars, with whether the caller currently holds an unused
+       entitlement for each ─────────────────────────────────────────── */
+    @Transactional(readOnly = true)
+    public List<HrAssessmentDto> listAssessments(String email) {
+        User user = requireUser(email);
+        return hrAssessmentRepo.findAllByOrderByIdAsc().stream().map(a -> {
+            HrAssessmentDto dto = new HrAssessmentDto();
+            dto.setId(a.getId());
+            dto.setCode(a.getCode());
+            dto.setName(a.getName());
+            dto.setQuestionCount(a.getQuestionCount());
+            dto.setTimeMinutes(a.getTimeMinutes());
+            dto.setEntitled(entitlementRepo
+                    .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, productCodeFor(a.getId()))
+                    .isPresent());
+            return dto;
+        }).toList();
+    }
+
+    /* ── Start a fresh attempt at one pillar ───────────────────────── */
+    @Transactional
+    public HrStartAssessmentResponse start(short assessmentId, String email) {
+        User user = requireUser(email);
+        HrAssessment assessment = requireAssessment(assessmentId);
+        String productCode = productCodeFor(assessmentId);
+
+        Entitlement entitlement = entitlementRepo
+                .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, productCode)
+                .orElseThrow(() -> new AccessDeniedException("No unused entitlement for " + assessment.getName()));
+
+        List<String> questionIds = generateQuestionIds(assessment);
+
+        int attemptNumber = sessionRepo.findByUserAndProductCodeOrderByAttemptNumberDesc(user, productCode)
+                .stream().findFirst().map(s -> s.getAttemptNumber() + 1).orElse(1);
+
+        AssessmentSession session = new AssessmentSession();
+        session.setUser(user);
+        session.setProductCode(productCode);
+        session.setAttemptNumber(attemptNumber);
+        session.setQuestionIds(questionIds);
+        session.setStatus(SessionStatus.IN_PROGRESS);
+        session = sessionRepo.save(session);
+
+        entitlement.setUsed(true);
+        entitlementRepo.save(entitlement);
+
+        HrStartAssessmentResponse res = new HrStartAssessmentResponse();
+        res.setSessionId(session.getId());
+        res.setAttemptNumber(session.getAttemptNumber());
+        res.setQuestions(toOrderedQuestionDtos(questionIds, session.getId()));
+        res.setDeadlineAt(session.getDeadlineAt());
+        return res;
+    }
+
+    /* ── The caller's in-progress session for one pillar, if any (resume-
+       after-login) — mirrors AssessmentService.current(), parametrized by
+       pillar since HR has 7 independent product codes instead of Leader's
+       one. ─────────────────────────────────────────────────────────── */
+    @Transactional
+    public Optional<HrSessionResumeResponse> current(short assessmentId, String email) {
+        User user = requireUser(email);
+        return sessionRepo
+                .findFirstByUserAndProductCodeAndStatusOrderByStartedAtDesc(
+                        user, productCodeFor(assessmentId), SessionStatus.IN_PROGRESS)
+                .map(session -> resume(session.getId(), email));
+    }
+
+    /* ── Resume: current questions + what's already answered ─────── */
+    @Transactional
+    public HrSessionResumeResponse resume(UUID sessionId, String email) {
+        AssessmentSession session = requireOwnedHrSession(sessionId, email);
+        if (session.getStatus() == SessionStatus.IN_PROGRESS && SessionTimer.applyResumeGrace(session))
+            session = sessionRepo.save(session);
+
+        Map<String, String> answered = answerRepo.findBySessionId(sessionId).stream()
+                .collect(Collectors.toMap(Answer::getQuestionId, a -> String.valueOf(a.getSelectedOption())));
+
+        HrSessionResumeResponse res = new HrSessionResumeResponse();
+        HrAssessment assessment = requireAssessment(assessmentIdFromProductCode(session.getProductCode()));
+        res.setSessionId(session.getId());
+        res.setAssessmentId(assessment.getId());
+        res.setAssessmentName(assessment.getName());
+        res.setAttemptNumber(session.getAttemptNumber());
+        res.setStatus(session.getStatus().name());
+        res.setQuestions(toOrderedQuestionDtos(session.getQuestionIds(), session.getId()));
+        res.setAnsweredOptions(answered);
+        res.setDeadlineAt(session.getDeadlineAt());
+        return res;
+    }
+
+    /* ── Every in-progress session across all 7 pillars — for the unified
+       /dashboard, which shows HR activity alongside Leader/Org/Pulse rather
+       than on a separate page. One query instead of 7 per-pillar lookups. ── */
+    @Transactional
+    public List<HrSessionResumeResponse> listInProgress(String email) {
+        User user = requireUser(email);
+        return sessionRepo.findByUserAndStatusAndProductCodeStartingWith(user, SessionStatus.IN_PROGRESS, PRODUCT_PREFIX)
+                .stream().map(session -> resume(session.getId(), email)).toList();
+    }
+
+    /* ── Autosave one answer (upsert) ─────────────────────────────── */
+    @Transactional
+    public AnswerResponse answer(UUID sessionId, String email, HrAnswerRequest req) {
+        AssessmentSession session = requireOwnedHrSession(sessionId, email);
+        if (session.getStatus() != SessionStatus.IN_PROGRESS)
+            throw new IllegalStateException("This assessment has already been submitted");
+        if (!session.getQuestionIds().contains(req.getQuestionId()))
+            throw new IllegalArgumentException("Question is not part of this session");
+
+        HrQuestionBank question = hrQuestionBankRepo.findById(req.getQuestionId())
+                .orElseThrow(() -> new IllegalArgumentException("Unknown question: " + req.getQuestionId()));
+
+        // The client only ever sees/sends the *displayed* letter (post-shuffle) — translate
+        // back to the original A-E the scores are actually keyed by. See OptionOrder.
+        char displayed = req.getSelectedOption().charAt(0);
+        char original = OptionOrder.toOriginal(req.getQuestionId(), session.getId(), displayed, HR_OPTION_COUNT);
+        short score = question.scoreFor(original);
+
+        Answer answer = answerRepo.findBySessionIdAndQuestionId(sessionId, req.getQuestionId())
+                .orElseGet(Answer::new);
+        answer.setSession(session);
+        answer.setQuestionId(req.getQuestionId());
+        answer.setSelectedOption(displayed);
+        answer.setScore(score);
+        answerRepo.save(answer);
+
+        int answeredCount = answerRepo.findBySessionId(sessionId).size();
+
+        AnswerResponse res = new AnswerResponse();
+        res.setQuestionId(req.getQuestionId());
+        res.setSelectedOption(req.getSelectedOption());
+        res.setAnsweredCount(answeredCount);
+        res.setTotalQuestions(session.getQuestionIds().size());
+        return res;
+    }
+
+    /* ── Submit: score, roll up competency/skill-category, persist ── */
+    @Transactional
+    public HrResultResponse submit(UUID sessionId, String email) {
+        AssessmentSession session = requireOwnedHrSession(sessionId, email);
+        if (session.getStatus() != SessionStatus.IN_PROGRESS)
+            throw new IllegalStateException("This assessment has already been submitted");
+
+        List<Answer> answers = answerRepo.findBySessionId(sessionId);
+        int total = session.getQuestionIds().size();
+        if (answers.size() < total)
+            throw new IllegalArgumentException(
+                    "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
+
+        Map<String, HrQuestionBank> questionsById = hrQuestionBankRepo
+                .findByQuestionIdIn(answers.stream().map(Answer::getQuestionId).toList()).stream()
+                .collect(Collectors.toMap(HrQuestionBank::getQuestionId, q -> q));
+
+        Set<String> competencyCodes = questionsById.values().stream()
+                .map(HrQuestionBank::getCompetencyCode).collect(Collectors.toSet());
+        Map<String, HrCompetency> competenciesByCode = hrCompetencyRepo.findAllById(competencyCodes).stream()
+                .collect(Collectors.toMap(HrCompetency::getCode, c -> c));
+
+        Set<Integer> skillCategoryIds = competenciesByCode.values().stream()
+                .map(HrCompetency::getSkillCategoryId).collect(Collectors.toSet());
+        Map<Integer, String> skillCategoryNames = hrSkillCategoryRepo.findAllById(skillCategoryIds).stream()
+                .collect(Collectors.toMap(HrSkillCategory::getId, HrSkillCategory::getName));
+
+        Map<String, Integer> competencyScores = new LinkedHashMap<>();
+        Map<String, Integer> skillCategoryScores = new LinkedHashMap<>();
+
+        int overall = 0;
+        Answer strongestAnswer = null;
+        Answer weakestAnswer = null;
+
+        for (Answer a : answers) {
+            HrQuestionBank q = questionsById.get(a.getQuestionId());
+            String competencyCode = q.getCompetencyCode();
+            competencyScores.merge(competencyCode, (int) a.getScore(), Integer::sum);
+
+            String skillCategoryName = skillCategoryNames.get(competenciesByCode.get(competencyCode).getSkillCategoryId());
+            skillCategoryScores.merge(skillCategoryName, (int) a.getScore(), Integer::sum);
+
+            overall += a.getScore();
+            if (strongestAnswer == null || a.getScore() > strongestAnswer.getScore()) strongestAnswer = a;
+            if (weakestAnswer == null || a.getScore() < weakestAnswer.getScore()) weakestAnswer = a;
+        }
+
+        HrResult result = new HrResult();
+        result.setSession(session);
+        result.setUser(session.getUser());
+        result.setAssessment(requireAssessment(assessmentIdFromProductCode(session.getProductCode())));
+        result.setAttemptNumber(session.getAttemptNumber());
+        result.setOverallScore((short) overall);
+        result.setCompetencyScores(competencyScores);
+        result.setSkillCategoryScores(skillCategoryScores);
+        result.setStrongestCompetency(questionsById.get(strongestAnswer.getQuestionId()).getCompetencyCode());
+        result.setWeakestCompetency(questionsById.get(weakestAnswer.getQuestionId()).getCompetencyCode());
+        result = hrResultRepo.save(result);
+
+        session.setStatus(SessionStatus.COMPLETED);
+        session.setCompletedAt(LocalDateTime.now());
+        sessionRepo.save(session);
+
+        return toResponse(result);
+    }
+
+    /* ── Attempt history, all 7 pillars combined ───────────────────── */
+    @Transactional(readOnly = true)
+    public List<HrResultResponse> listResults(String email) {
+        User user = requireUser(email);
+        return hrResultRepo.findByUserOrderByCreatedAtDesc(user).stream().map(this::toResponse).toList();
+    }
+
+    /* ── Selection algorithm ─────────────────────────────────────────
+       For each competency in the assessment, draw min_random_selection
+       distinct active questions from that competency's own pool. Then fill
+       the remainder ("balance") with distinct active questions drawn from
+       anywhere in the assessment that wasn't already picked. Finally
+       shuffle the combined set so competency order isn't detectable from
+       question order. ─────────────────────────────────────────────── */
+    // Package-private (not private) so HrAssessmentServiceTest can exercise the
+    // selection algorithm directly rather than only indirectly through start().
+    List<String> generateQuestionIds(HrAssessment assessment) {
+        List<HrCompetency> competencies = hrCompetencyRepo.findByAssessmentId(assessment.getId());
+        List<String> questionIds = new ArrayList<>(assessment.getQuestionCount());
+        Set<String> chosen = new HashSet<>();
+
+        for (HrCompetency competency : competencies) {
+            List<HrQuestionBank> pool = hrQuestionBankRepo.findByCompetencyCodeAndActiveTrue(competency.getCode());
+            if (pool.size() < competency.getMinRandomSelection())
+                throw new IllegalStateException("Not enough active questions for competency " + competency.getCode()
+                        + " (need " + competency.getMinRandomSelection() + ", have " + pool.size() + ")");
+
+            shuffle(pool);
+            for (int i = 0; i < competency.getMinRandomSelection(); i++) {
+                String questionId = pool.get(i).getQuestionId();
+                questionIds.add(questionId);
+                chosen.add(questionId);
+            }
+        }
+
+        int balance = assessment.getQuestionCount() - questionIds.size();
+        if (balance > 0) {
+            List<String> competencyCodes = competencies.stream().map(HrCompetency::getCode).toList();
+            List<HrQuestionBank> remaining = hrQuestionBankRepo
+                    .findByCompetencyCodeInAndActiveTrue(competencyCodes).stream()
+                    .filter(q -> !chosen.contains(q.getQuestionId()))
+                    .collect(Collectors.toCollection(ArrayList::new));
+            if (remaining.size() < balance)
+                throw new IllegalStateException("Not enough remaining active questions in assessment "
+                        + assessment.getId() + " to fill the balance (need " + balance + ", have " + remaining.size() + ")");
+
+            shuffle(remaining);
+            for (int i = 0; i < balance; i++) questionIds.add(remaining.get(i).getQuestionId());
+        } else if (balance < 0) {
+            // Shouldn't happen given the verified taxonomy data, but this is a
+            // configuration error worth failing loudly on rather than silently
+            // truncating to question_count.
+            throw new IllegalStateException("Assessment " + assessment.getId()
+                    + ": sum of competency min_random_selection exceeds question_count");
+        }
+
+        shuffle(questionIds);
+        return questionIds;
+    }
+
+    /* ── Private helpers ───────────────────────────────────────── */
+    private <T> void shuffle(List<T> list) {
+        for (int i = list.size() - 1; i > 0; i--) {
+            int j = secureRandom.nextInt(i + 1);
+            Collections.swap(list, i, j);
+        }
+    }
+
+    private static String productCodeFor(short assessmentId) {
+        return PRODUCT_PREFIX + assessmentId;
+    }
+
+    private static short assessmentIdFromProductCode(String productCode) {
+        return Short.parseShort(productCode.substring(PRODUCT_PREFIX.length()));
+    }
+
+    private List<HrQuestionDto> toOrderedQuestionDtos(List<String> ids, UUID sessionId) {
+        Map<String, HrQuestionBank> byId = hrQuestionBankRepo.findByQuestionIdIn(ids).stream()
+                .collect(Collectors.toMap(HrQuestionBank::getQuestionId, q -> q));
+        return ids.stream().map(id -> toQuestionDto(byId.get(id), sessionId)).toList();
+    }
+
+    private HrQuestionDto toQuestionDto(HrQuestionBank q, UUID sessionId) {
+        char[] order = OptionOrder.displayOrder(q.getQuestionId(), sessionId, HR_OPTION_COUNT);
+        HrQuestionDto dto = new HrQuestionDto();
+        dto.setQuestionId(q.getQuestionId());
+        dto.setText(q.getText());
+        dto.setOptionA(optionText(q, order[0]));
+        dto.setOptionB(optionText(q, order[1]));
+        dto.setOptionC(optionText(q, order[2]));
+        dto.setOptionD(optionText(q, order[3]));
+        dto.setOptionE(optionText(q, order[4]));
+        return dto;
+    }
+
+    private String optionText(HrQuestionBank q, char original) {
+        return switch (original) {
+            case 'A' -> q.getOptionA();
+            case 'B' -> q.getOptionB();
+            case 'C' -> q.getOptionC();
+            case 'D' -> q.getOptionD();
+            case 'E' -> q.getOptionE();
+            default -> throw new IllegalArgumentException("Invalid option: " + original);
+        };
+    }
+
+    private HrResultResponse toResponse(HrResult r) {
+        HrResultResponse dto = new HrResultResponse();
+        dto.setId(r.getId());
+        dto.setSessionId(r.getSession().getId());
+
+        HrAssessment assessment = r.getAssessment();
+        dto.setAssessmentId(assessment.getId());
+        dto.setAssessmentCode(assessment.getCode());
+        dto.setAssessmentName(assessment.getName());
+
+        dto.setAttemptNumber(r.getAttemptNumber());
+        dto.setOverallScore(r.getOverallScore());
+        dto.setCompetencyScores(r.getCompetencyScores());
+        dto.setSkillCategoryScores(r.getSkillCategoryScores());
+        dto.setStrongestCompetency(r.getStrongestCompetency());
+        dto.setWeakestCompetency(r.getWeakestCompetency());
+
+        if (r.getStrongestCompetency() != null)
+            hrCompetencyRepo.findById(r.getStrongestCompetency()).ifPresent(c -> dto.setStrongestCompetencyName(c.getName()));
+        if (r.getWeakestCompetency() != null)
+            hrCompetencyRepo.findById(r.getWeakestCompetency()).ifPresent(c -> dto.setWeakestCompetencyName(c.getName()));
+
+        dto.setCreatedAt(r.getCreatedAt());
+        return dto;
+    }
+
+    /** Same generic session table Leader/Pulse use, so a session's productCode must
+     *  actually be one of ours (HR_A1..HR_A7) — otherwise a Leader/Pulse session ID
+     *  could be resumed/answered through the HR endpoints by mistake. */
+    private AssessmentSession requireOwnedHrSession(UUID sessionId, String email) {
+        AssessmentSession session = sessionRepo.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Assessment session not found"));
+        if (!session.getUser().getEmail().equalsIgnoreCase(email) || !session.getProductCode().startsWith(PRODUCT_PREFIX))
+            throw new IllegalArgumentException("Assessment session not found");
+        return session;
+    }
+
+    private HrAssessment requireAssessment(short assessmentId) {
+        return hrAssessmentRepo.findById(assessmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown assessment: " + assessmentId));
+    }
+
+    private User requireUser(String email) {
+        return userRepo.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+    }
+}
