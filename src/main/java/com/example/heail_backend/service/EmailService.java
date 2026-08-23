@@ -589,9 +589,13 @@ public class EmailService {
         return frontendBaseUrl + "/hr/candidate/" + accessToken;
     }
 
+    /** @param buyerEmailCc CC'd on the candidate's invitation so the HR buyer
+     *  who registered them has visibility that it actually went out — the
+     *  buyer never gets their own copy of the assessment link otherwise,
+     *  since entitlements belong to the candidate, not them. */
     @Async
     public void sendCandidateInvitation(String toEmail, String candidateName, List<String> assessmentNames,
-                                         String accessToken, LocalDateTime expiresAt) {
+                                         String accessToken, LocalDateTime expiresAt, String buyerEmailCc) {
         if (toEmail == null || toEmail.isBlank()) {
             log.info("Skipped sendCandidateInvitation — no recipient email");
             return;
@@ -599,6 +603,7 @@ public class EmailService {
         try {
             SimpleMailMessage msg = new SimpleMailMessage();
             msg.setTo(toEmail);
+            if (buyerEmailCc != null && !buyerEmailCc.isBlank()) msg.setCc(buyerEmailCc);
             msg.setSubject("You've been invited to take an assessment — HEAIL");
             msg.setText("""
                     Dear %s,
@@ -629,39 +634,6 @@ public class EmailService {
     }
 
     @Async
-    public void sendCandidateReallocationInviteSent(String toEmail, String candidateName, List<String> assessmentNames,
-                                                      String accessToken, LocalDateTime expiresAt) {
-        if (toEmail == null || toEmail.isBlank()) {
-            log.info("Skipped sendCandidateReallocationInviteSent — no recipient email");
-            return;
-        }
-        try {
-            SimpleMailMessage msg = new SimpleMailMessage();
-            msg.setTo(toEmail);
-            msg.setSubject("You've been invited to take an assessment — HEAIL");
-            msg.setText("""
-                    Dear %s,
-
-                    You've been invited to complete the following HEAIL assessment(s):
-
-                    %s
-
-                    Start here (no account or password needed):
-                    %s
-
-                    This link expires on %s and cannot be renewed.
-
-                    — Team HEAIL
-                    contact@heail.in
-                    """.formatted(candidateName, String.join("\n", assessmentNames.stream().map(n -> "  • " + n).toList()),
-                    candidateLink(accessToken), expiresAt.toLocalDate()));
-            mailSender.send(msg);
-        } catch (Exception e) {
-            log.error("Failed to send reallocation invitation to {}: {}", toEmail, e.getMessage());
-        }
-    }
-
-    @Async
     public void sendBuyerReallocationApproved(String toEmail, String buyerName, String oldCandidateName, String newCandidateName) {
         if (toEmail == null || toEmail.isBlank()) {
             log.info("Skipped sendBuyerReallocationApproved — no recipient email");
@@ -687,7 +659,8 @@ public class EmailService {
     }
 
     @Async
-    public void sendCandidateRetakeGranted(String toEmail, String candidateName, String assessmentName, String accessToken) {
+    public void sendCandidateRetakeGranted(String toEmail, String candidateName, String assessmentName,
+                                            String accessToken, String buyerEmailCc) {
         if (toEmail == null || toEmail.isBlank()) {
             log.info("Skipped sendCandidateRetakeGranted — no recipient email");
             return;
@@ -695,6 +668,7 @@ public class EmailService {
         try {
             SimpleMailMessage msg = new SimpleMailMessage();
             msg.setTo(toEmail);
+            if (buyerEmailCc != null && !buyerEmailCc.isBlank()) msg.setCc(buyerEmailCc);
             msg.setSubject("HEAIL — You've been granted a retake");
             msg.setText("""
                     Dear %s,

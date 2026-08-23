@@ -291,7 +291,7 @@ public class AdminDashboardService {
             }
             String freshToken = hrOrderService.regenerateCandidateToken(candidate);
             emailService.sendCandidateRetakeGranted(candidate.getEmail(), candidate.getName(),
-                    String.join(", ", hrOrderService.selectedPillarNames(order)), freshToken);
+                    String.join(", ", hrOrderService.selectedPillarNames(order)), freshToken, order.getUser().getEmail());
         }
 
         req.setStatus("APPROVED");

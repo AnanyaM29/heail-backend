@@ -398,7 +398,7 @@ public class HrOrderService {
         hrCandidateRepo.save(candidate);
 
         emailService.sendCandidateInvitation(candidate.getEmail(), candidate.getName(), pillarNames,
-                candidate.getAccessToken(), candidate.getTokenExpiresAt());
+                candidate.getAccessToken(), candidate.getTokenExpiresAt(), order.getUser().getEmail());
     }
 
     /** Pillar names currently selected on an order — used by AdminDashboardService
