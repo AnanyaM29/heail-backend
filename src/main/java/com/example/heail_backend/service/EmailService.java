@@ -634,59 +634,6 @@ public class EmailService {
     }
 
     @Async
-    public void sendBuyerReallocationApproved(String toEmail, String buyerName, String oldCandidateName, String newCandidateName) {
-        if (toEmail == null || toEmail.isBlank()) {
-            log.info("Skipped sendBuyerReallocationApproved — no recipient email");
-            return;
-        }
-        try {
-            SimpleMailMessage msg = new SimpleMailMessage();
-            msg.setTo(toEmail);
-            msg.setSubject("HEAIL — Candidate reallocation approved");
-            msg.setText("""
-                    Dear %s,
-
-                    Your request to reallocate %s's assessment credit to %s has been
-                    approved. %s has been emailed a fresh invitation.
-
-                    — Team HEAIL
-                    contact@heail.in
-                    """.formatted(buyerName, oldCandidateName, newCandidateName, newCandidateName));
-            mailSender.send(msg);
-        } catch (Exception e) {
-            log.error("Failed to send reallocation-approved email to {}: {}", toEmail, e.getMessage());
-        }
-    }
-
-    @Async
-    public void sendCandidateRetakeGranted(String toEmail, String candidateName, String assessmentName,
-                                            String accessToken, String buyerEmailCc) {
-        if (toEmail == null || toEmail.isBlank()) {
-            log.info("Skipped sendCandidateRetakeGranted — no recipient email");
-            return;
-        }
-        try {
-            SimpleMailMessage msg = new SimpleMailMessage();
-            msg.setTo(toEmail);
-            if (buyerEmailCc != null && !buyerEmailCc.isBlank()) msg.setCc(buyerEmailCc);
-            msg.setSubject("HEAIL — You've been granted a retake");
-            msg.setText("""
-                    Dear %s,
-
-                    You've been granted a one-time retake of %s. Use your original
-                    access link to begin, or start here if that one has expired:
-                    %s
-
-                    — Team HEAIL
-                    contact@heail.in
-                    """.formatted(candidateName, assessmentName, candidateLink(accessToken)));
-            mailSender.send(msg);
-        } catch (Exception e) {
-            log.error("Failed to send retake-granted email to {}: {}", toEmail, e.getMessage());
-        }
-    }
-
-    @Async
     public void sendBuyerCandidateExpired(String toEmail, String buyerName, String candidateName) {
         if (toEmail == null || toEmail.isBlank()) {
             log.info("Skipped sendBuyerCandidateExpired — no recipient email");

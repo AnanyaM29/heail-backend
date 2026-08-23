@@ -49,6 +49,21 @@ public class HrOrderController {
         return ResponseEntity.ok(hrOrderService.listMyCandidates(auth.getName()));
     }
 
+    /** Both return a fresh DRAFT order with one candidate already on it —
+     *  frontend routes straight into /pricing/buy-hr/{id} (agreement → pay),
+     *  same as any other order. */
+    @PostMapping("/candidates/{candidateId}/retake")
+    public ResponseEntity<OrderResponse> createRetakeOrder(@PathVariable UUID candidateId, Authentication auth) {
+        return ResponseEntity.ok(hrOrderService.createRetakeOrder(candidateId, auth.getName()));
+    }
+
+    @PostMapping("/candidates/{candidateId}/reallocate")
+    public ResponseEntity<OrderResponse> createReallocationOrder(@PathVariable UUID candidateId,
+                                                                   @RequestBody ReallocationRequestDto newDetails,
+                                                                   Authentication auth) {
+        return ResponseEntity.ok(hrOrderService.createReallocationOrder(candidateId, auth.getName(), newDetails));
+    }
+
     @PostMapping("/{id}/agreement")
     public ResponseEntity<OrderResponse> acceptAgreement(@PathVariable UUID id,
                                                            @Valid @RequestBody AcceptAgreementRequest req,

@@ -4,7 +4,6 @@ import com.example.heail_backend.dto.AdminPartnerDto;
 import com.example.heail_backend.dto.AdminPaymentDto;
 import com.example.heail_backend.dto.AdminTestSessionDto;
 import com.example.heail_backend.dto.AdminUserDto;
-import com.example.heail_backend.dto.HrCandidateRequestDto;
 import com.example.heail_backend.service.AdminDashboardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
@@ -12,7 +11,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -119,23 +117,6 @@ public class AdminDashboardController {
     @GetMapping("/partners")
     public ResponseEntity<List<AdminPartnerDto>> partners() {
         return ResponseEntity.ok(adminDashboardService.listPartners());
-    }
-
-    @GetMapping("/hr-requests")
-    public ResponseEntity<List<HrCandidateRequestDto>> hrRequests() {
-        return ResponseEntity.ok(adminDashboardService.listHrRequests());
-    }
-
-    @PostMapping("/hr-requests/{id}/approve")
-    public ResponseEntity<?> approveHrRequest(@PathVariable UUID id, Authentication auth) {
-        adminDashboardService.approveHrRequest(id, auth.getName());
-        return ResponseEntity.ok(Map.of("message", "Request approved"));
-    }
-
-    @PostMapping("/hr-requests/{id}/reject")
-    public ResponseEntity<?> rejectHrRequest(@PathVariable UUID id, @RequestBody(required = false) Map<String, String> body, Authentication auth) {
-        adminDashboardService.rejectHrRequest(id, auth.getName(), body != null ? body.get("note") : null);
-        return ResponseEntity.ok(Map.of("message", "Request rejected"));
     }
 
     @GetMapping("/partners/{id}/resume")

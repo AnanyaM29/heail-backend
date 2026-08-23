@@ -10,5 +10,4 @@ public class ReallocationRequestDto {
     LocalDate newDob;
     String newEmail;
     String newMobile;
-    LocalDate newStartDate;
 }
