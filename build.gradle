@@ -17,8 +17,19 @@ repositories {
 	mavenCentral()
 }
 
+ext {
+	springCloudAwsVersion = '3.4.2'
+}
+
+dependencyManagement {
+	imports {
+		mavenBom "io.awspring.cloud:spring-cloud-aws-dependencies:${springCloudAwsVersion}"
+	}
+}
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'io.awspring.cloud:spring-cloud-aws-starter-secrets-manager'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
