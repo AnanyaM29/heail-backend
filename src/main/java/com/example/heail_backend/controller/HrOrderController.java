@@ -1,9 +1,6 @@
 package com.example.heail_backend.controller;
 
-import com.example.heail_backend.dto.AcceptAgreementRequest;
-import com.example.heail_backend.dto.HrCreateOrderRequest;
-import com.example.heail_backend.dto.OrderResponse;
-import com.example.heail_backend.dto.VerifyRazorpayPaymentRequest;
+import com.example.heail_backend.dto.*;
 import com.example.heail_backend.service.HrOrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +9,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -32,6 +30,23 @@ public class HrOrderController {
     @GetMapping("/{id}")
     public ResponseEntity<OrderResponse> get(@PathVariable UUID id, Authentication auth) {
         return ResponseEntity.ok(hrOrderService.getOrder(id, auth.getName()));
+    }
+
+    @GetMapping("/{id}/candidates")
+    public ResponseEntity<HrOrderResponse> getWithCandidates(@PathVariable UUID id, Authentication auth) {
+        return ResponseEntity.ok(hrOrderService.getOrderWithCandidates(id, auth.getName()));
+    }
+
+    @PutMapping("/{id}/candidates")
+    public ResponseEntity<HrOrderResponse> setCandidates(@PathVariable UUID id,
+                                                          @RequestBody List<CandidateRowRequest> rows,
+                                                          Authentication auth) {
+        return ResponseEntity.ok(hrOrderService.setCandidates(id, auth.getName(), rows));
+    }
+
+    @GetMapping("/candidates/mine")
+    public ResponseEntity<List<HrCandidateDto>> myCandidates(Authentication auth) {
+        return ResponseEntity.ok(hrOrderService.listMyCandidates(auth.getName()));
     }
 
     @PostMapping("/{id}/agreement")

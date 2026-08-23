@@ -1,35 +1,44 @@
 package com.example.heail_backend.service;
 
-import com.example.heail_backend.dto.OrderResponse;
+import com.example.heail_backend.dto.*;
 import com.example.heail_backend.entity.*;
+import com.example.heail_backend.exception.EmployeeBatchValidationException;
 import com.example.heail_backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.security.SecureRandom;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Purchase flow for the HR Competency Assessment product — pick any subset
- * of the 7 pillars, pay once, self-serve — same "anyone can buy it" shape
- * as OrderService/Leader, not a bulk org-roster round like OrgOrderService.
- * The one real difference from Leader: this order can grant *multiple*
- * entitlements (one per selected pillar) rather than exactly one, so the
- * selection has to be captured somewhere on the order and read back at
- * fulfilment time — done via Order.metadata (see SELECTED_IDS_KEY), the
- * same free-form JSON column Leader already uses for designation/org name.
+ * Purchase flow for the HR Competency Assessment product — a buyer (HR/
+ * recruiter) picks a subset of the 7 pillars, registers the candidates who
+ * will actually take them (every candidate takes every selected pillar),
+ * then pays. Not self-serve: the buyer's own account never gets an
+ * entitlement here, only their candidates do (see fulfil()).
  *
- * Deliberately duplicated from OrderService rather than generalizing it —
- * same reasoning as OrgOrderService already being its own class: each
- * purchase shape's fulfilment differs enough (here: N entitlements from one
- * order, not one) that sharing the state-machine code would mean threading
- * product-specific branches through every method anyway.
+ * Price is pillars × candidate count, so candidates are entered *before*
+ * payment — same ordering as OrgOrderService's roster-then-pay flow, for the
+ * same reason (price depends on headcount). selectAssessments() and
+ * setCandidates() are the two draft-mutating steps, mirroring
+ * OrgOrderService.setOrgDetails()/setEmployees(); pillar selection is
+ * captured on Order.metadata (see SELECTED_IDS_KEY), same free-form JSON
+ * column Leader already uses for designation/org name.
+ *
+ * Deliberately duplicated from OrderService/OrgOrderService rather than
+ * generalizing them — each purchase shape's fulfilment differs enough that
+ * sharing the state-machine code would mean threading product-specific
+ * branches through every method anyway.
  */
 @Slf4j
 @Service
@@ -42,6 +51,8 @@ public class HrOrderService {
     private static final String INR_CURRENCY = "INR";
     private static final String SELECTED_IDS_KEY = "selectedAssessmentIds";
     private static final String ENTITLEMENT_PREFIX = "HR_A";
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
+    private static final SecureRandom TOKEN_RANDOM = new SecureRandom();
 
     private final OrderRepository orderRepo;
     private final ConsentLogRepository consentRepo;
@@ -52,6 +63,9 @@ public class HrOrderService {
     private final RazorpayService razorpayService;
     private final InvoiceService invoiceService;
     private final HrAssessmentRepository hrAssessmentRepo;
+    private final HrCandidateRepository hrCandidateRepo;
+    private final HrResultRepository hrResultRepo;
+    private final PasswordEncoder encoder;
 
     @Value("${app.payments.razorpay-enabled:false}")
     private boolean razorpayEnabled;
@@ -75,27 +89,151 @@ public class HrOrderService {
         // further along but never PAID is treated as a dead, interrupted attempt.
         boolean reusable = latest != null && latest.getStatus() == OrderStatus.DRAFT;
 
-        PricingItem pricing = pricingRepo.findByProductCodeAndCurrencyAndActiveTrue(HR_PILLAR_PRICING_CODE, INR_CURRENCY)
-                .orElseThrow(() -> new IllegalStateException("No active price configured for " + HR_PILLAR_PRICING_CODE));
-
-        BigDecimal amount = pricing.getAmount().multiply(BigDecimal.valueOf(distinctIds.size()));
-        BigDecimal gstAmount = amount.multiply(pricing.getGstPct())
-                .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-
         Order order = reusable ? latest : new Order();
         order.setUser(user);
         order.setProductCode(HR_SUITE_PRODUCT);
-        order.setAmount(amount);
-        order.setGstAmount(gstAmount);
-        order.setCurrency(pricing.getCurrency());
+        order.setCurrency(INR_CURRENCY);
         order.setStatus(OrderStatus.DRAFT);
 
         Map<String, String> metadata = order.getMetadata() != null ? new HashMap<>(order.getMetadata()) : new HashMap<>();
         metadata.put(SELECTED_IDS_KEY, serializeIds(distinctIds));
         order.setMetadata(metadata);
 
+        // Price is pillars × candidates, but candidates are entered on the *next*
+        // step (setCandidates) — reprice against whatever's already on this draft
+        // (0 for a brand-new order, or the existing roster if the buyer came back
+        // to change their pillar selection after already entering candidates).
+        int candidateCount = reusable ? hrCandidateRepo.findByOrder(latest).size() : 0;
+        repriceForCandidates(order, distinctIds.size(), candidateCount);
+
         order = orderRepo.save(order);
         return toResponse(order);
+    }
+
+    /** Recomputes amount/GST for pillars × candidates, INR only (Razorpay is the only gateway). */
+    private void repriceForCandidates(Order order, int pillarCount, int candidateCount) {
+        if (candidateCount == 0) {
+            order.setAmount(BigDecimal.ZERO);
+            order.setGstAmount(BigDecimal.ZERO);
+            return;
+        }
+        PricingItem pricing = pricingRepo.findByProductCodeAndCurrencyAndActiveTrue(HR_PILLAR_PRICING_CODE, INR_CURRENCY)
+                .orElseThrow(() -> new IllegalStateException("No active price configured for " + HR_PILLAR_PRICING_CODE));
+
+        BigDecimal amount = pricing.getAmount().multiply(BigDecimal.valueOf((long) pillarCount * candidateCount));
+        BigDecimal gstAmount = amount.multiply(pricing.getGstPct()).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        order.setAmount(amount);
+        order.setGstAmount(gstAmount);
+    }
+
+    /* ── Replace the order's candidate roster, all-or-nothing — every
+       candidate takes every pillar selected on the order (see class doc) ── */
+    @Transactional
+    public HrOrderResponse setCandidates(UUID orderId, String email, List<CandidateRowRequest> rows) {
+        Order order = requireOwnedOrder(orderId, email);
+        if (order.getStatus() != OrderStatus.DRAFT)
+            throw new IllegalArgumentException("Candidates can only be set on a draft order");
+
+        List<Short> selectedIds = deserializeIds(
+                order.getMetadata() != null ? order.getMetadata().get(SELECTED_IDS_KEY) : null);
+        if (selectedIds.isEmpty())
+            throw new IllegalArgumentException("Select at least one assessment before adding candidates");
+
+        if (rows == null || rows.isEmpty())
+            throw new IllegalArgumentException("Add at least one candidate");
+
+        List<RowError> errors = new ArrayList<>();
+        List<String> seenEmails = new ArrayList<>();
+        LocalDate today = LocalDate.now();
+
+        for (int i = 0; i < rows.size(); i++) {
+            CandidateRowRequest row = rows.get(i);
+            int rowNumber = i + 1;
+
+            if (row.getName() == null || row.getName().isBlank()) {
+                errors.add(new RowError(rowNumber, "Name is required"));
+                continue;
+            }
+            if (row.getEmail() == null || !EMAIL_PATTERN.matcher(row.getEmail().trim()).matches()) {
+                errors.add(new RowError(rowNumber, "A valid email is required"));
+                continue;
+            }
+            String normalisedEmail = row.getEmail().trim().toLowerCase();
+            if (seenEmails.contains(normalisedEmail)) {
+                errors.add(new RowError(rowNumber, "Duplicate email within this submission"));
+                continue;
+            }
+            if (row.getDob() == null) {
+                errors.add(new RowError(rowNumber, "Date of birth is required"));
+                continue;
+            }
+            if (row.getMobile() == null || row.getMobile().trim().length() < 6) {
+                errors.add(new RowError(rowNumber, "A valid mobile number is required"));
+                continue;
+            }
+            if (row.getAssessmentStartDate() == null || row.getAssessmentStartDate().isBefore(today)) {
+                errors.add(new RowError(rowNumber, "Assessment start date is required and can't be in the past"));
+                continue;
+            }
+            seenEmails.add(normalisedEmail);
+        }
+
+        if (!errors.isEmpty()) throw new EmployeeBatchValidationException(errors);
+
+        hrCandidateRepo.deleteByOrder(order);
+
+        List<HrCandidate> candidates = new ArrayList<>();
+        for (CandidateRowRequest row : rows) {
+            HrCandidate c = new HrCandidate();
+            c.setOrder(order);
+            c.setName(row.getName().trim());
+            c.setDob(row.getDob());
+            c.setEmail(row.getEmail().trim().toLowerCase());
+            c.setMobile(row.getMobile().trim());
+            c.setAssessmentStartDate(row.getAssessmentStartDate());
+            c.setStatus("PENDING");
+            candidates.add(c);
+        }
+        hrCandidateRepo.saveAll(candidates);
+
+        repriceForCandidates(order, selectedIds.size(), candidates.size());
+        order = orderRepo.save(order);
+
+        return toHrOrderResponse(order);
+    }
+
+    /* ── Read the order + its candidate roster (candidate-entry screen, and
+       revisits before payment) ────────────────────────────────────────── */
+    @Transactional(readOnly = true)
+    public HrOrderResponse getOrderWithCandidates(UUID orderId, String email) {
+        return toHrOrderResponse(requireOwnedOrder(orderId, email));
+    }
+
+    /* ── Every candidate the buyer has ever registered, across every PAID
+       order, most recent first — the buyer-facing tracking view. Results are
+       looked up by the candidate's linked User, same as
+       HrAssessmentService.listResults(). ─────────────────────────────── */
+    @Transactional(readOnly = true)
+    public List<HrCandidateDto> listMyCandidates(String email) {
+        User buyer = requireUser(email);
+        LocalDateTime cutoff = LocalDateTime.now();
+        return hrCandidateRepo.findByOrderUserOrderByCreatedAtDesc(buyer).stream()
+                .filter(c -> c.getOrder().getStatus() == OrderStatus.PAID)
+                .map(c -> {
+                    HrCandidateDto dto = toCandidateDto(c);
+                    boolean withinReallocationWindow = c.getOrder().getPaidAt() != null
+                            && c.getOrder().getPaidAt().plusDays(7).isAfter(cutoff);
+                    dto.setCanRequestReallocation("SENT".equals(c.getStatus()) && withinReallocationWindow);
+                    dto.setCanRequestRetake(c.getUser() != null
+                            && !"REALLOCATED".equals(c.getStatus()) && !"PENDING".equals(c.getStatus()));
+                    if (c.getUser() != null) {
+                        dto.setResults(hrResultRepo.findByUserOrderByCreatedAtDesc(c.getUser()).stream()
+                                .map(r -> new HrCandidateResultSummary(r.getAssessment().getId(),
+                                        r.getAssessment().getName(), true, r.getOverallScore()))
+                                .toList());
+                    }
+                    return dto;
+                }).toList();
     }
 
     /* ── Accept the Terms of Agreement for an order ───────────────── */
@@ -104,6 +242,8 @@ public class HrOrderService {
         Order order = requireOwnedOrder(orderId, email);
         if (order.getStatus() != OrderStatus.DRAFT)
             throw new IllegalArgumentException("Agreement can only be accepted on a draft order");
+        if (hrCandidateRepo.findByOrder(order).isEmpty())
+            throw new IllegalArgumentException("Add candidates before accepting the agreement");
 
         order.setStatus(OrderStatus.AGREEMENT_ACCEPTED);
         order.setAgreementAcceptedAt(LocalDateTime.now());
@@ -194,9 +334,57 @@ public class HrOrderService {
         order.setInvoiceNumber(invoiceService.nextInvoiceNumber());
         order = orderRepo.save(order);
 
-        for (Short assessmentId : deserializeIds(metadata.get(SELECTED_IDS_KEY))) {
+        List<Short> selectedIds = deserializeIds(metadata.get(SELECTED_IDS_KEY));
+        List<HrCandidate> candidates = hrCandidateRepo.findByOrder(order);
+        fulfilCandidates(order, candidates, selectedIds);
+
+        BigDecimal total = order.getAmount().add(order.getGstAmount());
+        String amountDisplay = order.getCurrency() + " " + total.setScale(2, RoundingMode.HALF_UP);
+        byte[] invoicePdf = invoiceService.generate(order, order.getUser().getName(), order.getUser().getEmail());
+        emailService.sendInvoice(order.getUser().getEmail(), order.getUser().getName(),
+                amountDisplay, invoicePdf, order.getInvoiceNumber());
+    }
+
+    /**
+     * Per candidate: find-or-create a throwaway User (same shape as
+     * OrgOrderService.fulfil() — random unusable password, candidate never
+     * sees it), grant one Entitlement per selected pillar to that user (not
+     * the buyer), generate the access token + 7-day expiry window, and email
+     * the invite. A failure on one candidate doesn't block the rest — same
+     * per-row try/catch reasoning as OrgOrderService.fulfil().
+     */
+    private void fulfilCandidates(Order order, List<HrCandidate> candidates, List<Short> selectedIds) {
+        List<String> pillarNames = hrAssessmentRepo.findAllById(selectedIds).stream()
+                .map(HrAssessment::getName).toList();
+
+        for (HrCandidate candidate : candidates) {
+            try {
+                fulfilOneCandidate(order, candidate, selectedIds, pillarNames);
+            } catch (Exception e) {
+                log.error("Failed to fulfil HR candidate {}: {}", candidate.getEmail(), e.getMessage());
+            }
+        }
+    }
+
+    /** One candidate's worth of the fulfilment above — also used by
+     *  AdminDashboardService when a reallocation request is approved, to
+     *  send the newly-substituted candidate their own invite. */
+    public void fulfilOneCandidate(Order order, HrCandidate candidate, List<Short> selectedIds, List<String> pillarNames) {
+        User user = userRepo.findByEmail(candidate.getEmail()).orElse(null);
+        if (user == null) {
+            user = new User();
+            user.setName(candidate.getName());
+            user.setEmail(candidate.getEmail());
+            user.setPasswordHash(encoder.encode(UUID.randomUUID().toString()));
+            user.setRole("EMPLOYEE");
+            user.setMobile(candidate.getMobile());
+            user = userRepo.save(user);
+        }
+        candidate.setUser(user);
+
+        for (Short assessmentId : selectedIds) {
             Entitlement entitlement = new Entitlement();
-            entitlement.setUser(order.getUser());
+            entitlement.setUser(user);
             entitlement.setProductCode(ENTITLEMENT_PREFIX + assessmentId);
             entitlement.setSource(EntitlementSource.PURCHASE);
             entitlement.setOrder(order);
@@ -204,11 +392,44 @@ public class HrOrderService {
             entitlementRepo.save(entitlement);
         }
 
-        BigDecimal total = order.getAmount().add(order.getGstAmount());
-        String amountDisplay = order.getCurrency() + " " + total.setScale(2, RoundingMode.HALF_UP);
-        byte[] invoicePdf = invoiceService.generate(order, order.getUser().getName(), order.getUser().getEmail());
-        emailService.sendInvoice(order.getUser().getEmail(), order.getUser().getName(),
-                amountDisplay, invoicePdf, order.getInvoiceNumber());
+        candidate.setAccessToken(generateAccessToken());
+        candidate.setTokenExpiresAt(candidate.getAssessmentStartDate().atStartOfDay().plusDays(7));
+        candidate.setStatus("SENT");
+        hrCandidateRepo.save(candidate);
+
+        emailService.sendCandidateInvitation(candidate.getEmail(), candidate.getName(), pillarNames,
+                candidate.getAccessToken(), candidate.getTokenExpiresAt());
+    }
+
+    /** Pillar names currently selected on an order — used by AdminDashboardService
+     *  when fulfilling a reallocated candidate, so it doesn't need to know about
+     *  Order.metadata's internal key. */
+    public List<String> selectedPillarNames(Order order) {
+        List<Short> ids = deserializeIds(order.getMetadata() != null ? order.getMetadata().get(SELECTED_IDS_KEY) : null);
+        return hrAssessmentRepo.findAllById(ids).stream().map(HrAssessment::getName).toList();
+    }
+
+    public List<Short> selectedPillarIds(Order order) {
+        return deserializeIds(order.getMetadata() != null ? order.getMetadata().get(SELECTED_IDS_KEY) : null);
+    }
+
+    /** Issues a fresh access token/expiry/status for a candidate whose old one
+     *  may already be expired or spent — used when AdminDashboardService
+     *  grants a retake, so the candidate actually has a live link to use it
+     *  with (a new Entitlement alone doesn't help if their token is dead). */
+    @Transactional
+    public String regenerateCandidateToken(HrCandidate candidate) {
+        candidate.setAccessToken(generateAccessToken());
+        candidate.setTokenExpiresAt(LocalDateTime.now().plusDays(7));
+        candidate.setStatus("SENT");
+        hrCandidateRepo.save(candidate);
+        return candidate.getAccessToken();
+    }
+
+    private String generateAccessToken() {
+        byte[] bytes = new byte[32];
+        TOKEN_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     @Transactional
@@ -263,5 +484,30 @@ public class HrOrderService {
         res.setMetadata(order.getMetadata());
         res.setRazorpayKeyId(razorpayService.getKeyId());
         return res;
+    }
+
+    private HrOrderResponse toHrOrderResponse(Order order) {
+        HrOrderResponse res = new HrOrderResponse();
+        res.setOrder(toResponse(order));
+        List<Short> selectedIds = deserializeIds(
+                order.getMetadata() != null ? order.getMetadata().get(SELECTED_IDS_KEY) : null);
+        res.setSelectedAssessmentNames(hrAssessmentRepo.findAllById(selectedIds).stream()
+                .map(HrAssessment::getName).toList());
+        res.setCandidates(hrCandidateRepo.findByOrder(order).stream().map(this::toCandidateDto).toList());
+        return res;
+    }
+
+    private HrCandidateDto toCandidateDto(HrCandidate c) {
+        HrCandidateDto dto = new HrCandidateDto();
+        dto.setId(c.getId());
+        dto.setOrderId(c.getOrder().getId());
+        dto.setName(c.getName());
+        dto.setDob(c.getDob());
+        dto.setEmail(c.getEmail());
+        dto.setMobile(c.getMobile());
+        dto.setAssessmentStartDate(c.getAssessmentStartDate());
+        dto.setStatus(c.getStatus());
+        dto.setTokenExpiresAt(c.getTokenExpiresAt());
+        return dto;
     }
 }

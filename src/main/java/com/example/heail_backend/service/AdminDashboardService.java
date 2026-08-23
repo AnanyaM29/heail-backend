@@ -4,8 +4,13 @@ import com.example.heail_backend.dto.AdminPartnerDto;
 import com.example.heail_backend.dto.AdminPaymentDto;
 import com.example.heail_backend.dto.AdminTestSessionDto;
 import com.example.heail_backend.dto.AdminUserDto;
+import com.example.heail_backend.dto.HrCandidateRequestDto;
 import com.example.heail_backend.dto.OrgReportResponse;
 import com.example.heail_backend.entity.AssessmentSession;
+import com.example.heail_backend.entity.Entitlement;
+import com.example.heail_backend.entity.EntitlementSource;
+import com.example.heail_backend.entity.HrCandidate;
+import com.example.heail_backend.entity.HrCandidateRequest;
 import com.example.heail_backend.entity.LeaderResult;
 import com.example.heail_backend.entity.Order;
 import com.example.heail_backend.entity.OrderStatus;
@@ -13,6 +18,9 @@ import com.example.heail_backend.entity.Organisation;
 import com.example.heail_backend.entity.PartnerApplication;
 import com.example.heail_backend.entity.User;
 import com.example.heail_backend.repository.AssessmentSessionRepository;
+import com.example.heail_backend.repository.EntitlementRepository;
+import com.example.heail_backend.repository.HrCandidateRepository;
+import com.example.heail_backend.repository.HrCandidateRequestRepository;
 import com.example.heail_backend.repository.LeaderResultRepository;
 import com.example.heail_backend.repository.OrderRepository;
 import com.example.heail_backend.repository.PartnerApplicationRepository;
@@ -47,6 +55,10 @@ public class AdminDashboardService {
     private final InvoiceService invoiceService;
     private final OrgReportService orgReportService;
     private final OrgReportPdfService orgReportPdfService;
+    private final HrCandidateRequestRepository hrRequestRepo;
+    private final HrCandidateRepository hrCandidateRepo;
+    private final HrOrderService hrOrderService;
+    private final EntitlementRepository entitlementRepo;
 
     @Transactional(readOnly = true)
     public List<AdminTestSessionDto> listTests(int months) {
@@ -236,6 +248,96 @@ public class AdminDashboardService {
     }
 
     public record PartnerResumeFile(byte[] data, String filename) {}
+
+    /* ── HR candidate reallocation/retake requests ─────────────────── */
+    @Transactional(readOnly = true)
+    public List<HrCandidateRequestDto> listHrRequests() {
+        return hrRequestRepo.findByStatusOrderByCreatedAtAsc("PENDING").stream().map(this::toHrRequestDto).toList();
+    }
+
+    @Transactional
+    public void approveHrRequest(UUID requestId, String reviewerEmail) {
+        User reviewer = userRepo.findByEmail(reviewerEmail).orElse(null);
+        HrCandidateRequest req = requirePendingRequest(requestId);
+        HrCandidate candidate = req.getCandidate();
+        Order order = req.getOrder();
+
+        if ("REALLOCATION".equals(req.getType())) {
+            candidate.setStatus("REALLOCATED");
+            hrCandidateRepo.save(candidate);
+
+            HrCandidate replacement = new HrCandidate();
+            replacement.setOrder(order);
+            replacement.setName(req.getNewName());
+            replacement.setDob(req.getNewDob());
+            replacement.setEmail(req.getNewEmail());
+            replacement.setMobile(req.getNewMobile());
+            replacement.setAssessmentStartDate(req.getNewStartDate());
+            hrOrderService.fulfilOneCandidate(order, replacement,
+                    hrOrderService.selectedPillarIds(order), hrOrderService.selectedPillarNames(order));
+
+            emailService.sendBuyerReallocationApproved(order.getUser().getEmail(), order.getUser().getName(),
+                    candidate.getName(), replacement.getName());
+        } else { // RETAKE
+            List<Short> pillarIds = hrOrderService.selectedPillarIds(order);
+            for (Short assessmentId : pillarIds) {
+                Entitlement entitlement = new Entitlement();
+                entitlement.setUser(candidate.getUser());
+                entitlement.setProductCode("HR_A" + assessmentId);
+                entitlement.setSource(EntitlementSource.PURCHASE);
+                entitlement.setOrder(order);
+                entitlement.setUsed(false);
+                entitlementRepo.save(entitlement);
+            }
+            String freshToken = hrOrderService.regenerateCandidateToken(candidate);
+            emailService.sendCandidateRetakeGranted(candidate.getEmail(), candidate.getName(),
+                    String.join(", ", hrOrderService.selectedPillarNames(order)), freshToken);
+        }
+
+        req.setStatus("APPROVED");
+        req.setReviewedBy(reviewer);
+        req.setReviewedAt(LocalDateTime.now());
+        hrRequestRepo.save(req);
+    }
+
+    @Transactional
+    public void rejectHrRequest(UUID requestId, String reviewerEmail, String note) {
+        User reviewer = userRepo.findByEmail(reviewerEmail).orElse(null);
+        HrCandidateRequest req = requirePendingRequest(requestId);
+        req.setStatus("REJECTED");
+        req.setReviewedBy(reviewer);
+        req.setReviewedAt(LocalDateTime.now());
+        req.setReviewNote(note);
+        hrRequestRepo.save(req);
+    }
+
+    private HrCandidateRequest requirePendingRequest(UUID requestId) {
+        HrCandidateRequest req = hrRequestRepo.findById(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        if (!"PENDING".equals(req.getStatus()))
+            throw new IllegalArgumentException("This request has already been reviewed");
+        return req;
+    }
+
+    private HrCandidateRequestDto toHrRequestDto(HrCandidateRequest req) {
+        HrCandidateRequestDto dto = new HrCandidateRequestDto();
+        dto.setId(req.getId());
+        dto.setType(req.getType());
+        dto.setStatus(req.getStatus());
+        dto.setOrderId(req.getOrder().getId());
+        dto.setBuyerName(req.getOrder().getUser().getName());
+        dto.setBuyerEmail(req.getOrder().getUser().getEmail());
+        dto.setCandidateId(req.getCandidate().getId());
+        dto.setCandidateName(req.getCandidate().getName());
+        dto.setCandidateEmail(req.getCandidate().getEmail());
+        dto.setNewName(req.getNewName());
+        dto.setNewDob(req.getNewDob());
+        dto.setNewEmail(req.getNewEmail());
+        dto.setNewMobile(req.getNewMobile());
+        dto.setNewStartDate(req.getNewStartDate());
+        dto.setCreatedAt(req.getCreatedAt());
+        return dto;
+    }
 
     private User requireUser(UUID userId) {
         return userRepo.findById(userId)

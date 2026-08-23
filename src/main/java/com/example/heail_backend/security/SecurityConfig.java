@@ -47,7 +47,10 @@ public class SecurityConfig {
                 // is verified inside PaymentWebhookController via each gateway's own
                 // signature check, not Spring Security.
                 .requestMatchers("/api/v1/webhooks/**").permitAll()
-                    .requestMatchers("/actuator/health").permitAll()
+                // HR candidate access — the random access token itself is the
+                // credential (see HrCandidateAccessService); candidates never get a
+                // HEAIL password, so there's no JWT to send here.
+                .requestMatchers("/api/v1/hr/candidate/**").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)

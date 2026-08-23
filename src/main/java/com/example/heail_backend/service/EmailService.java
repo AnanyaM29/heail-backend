@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -577,6 +578,163 @@ public class EmailService {
             return frontendBaseUrl + "/reset-password?email=" + encodedEmail + "&otp=" + otp;
         } catch (UnsupportedEncodingException e) {
             return frontendBaseUrl + "/reset-password";
+        }
+    }
+
+    /* ── HR candidate flow — a buyer registers candidates, each gets a
+       tokenized link (no HEAIL account/password) to take their assigned
+       assessments. See HrOrderService.fulfilCandidates(). ──────────────── */
+
+    private String candidateLink(String accessToken) {
+        return frontendBaseUrl + "/hr/candidate/" + accessToken;
+    }
+
+    @Async
+    public void sendCandidateInvitation(String toEmail, String candidateName, List<String> assessmentNames,
+                                         String accessToken, LocalDateTime expiresAt) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendCandidateInvitation — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("You've been invited to take an assessment — HEAIL");
+            msg.setText("""
+                    Dear %s,
+
+                    You've been invited to complete the following HEAIL assessment(s):
+
+                    %s
+
+                    Each is 30 questions, timed at 30 minutes, completed in a single
+                    sitting — closing the browser or losing connection marks the
+                    attempt abandoned, so make sure you have an uninterrupted block of
+                    time before you begin.
+
+                    Start here (no account or password needed):
+                    %s
+
+                    This link expires on %s and cannot be renewed — if it lapses before
+                    you start, contact the person who invited you.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(candidateName, String.join("\n", assessmentNames.stream().map(n -> "  • " + n).toList()),
+                    candidateLink(accessToken), expiresAt.toLocalDate()));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send candidate invitation to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendCandidateReallocationInviteSent(String toEmail, String candidateName, List<String> assessmentNames,
+                                                      String accessToken, LocalDateTime expiresAt) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendCandidateReallocationInviteSent — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("You've been invited to take an assessment — HEAIL");
+            msg.setText("""
+                    Dear %s,
+
+                    You've been invited to complete the following HEAIL assessment(s):
+
+                    %s
+
+                    Start here (no account or password needed):
+                    %s
+
+                    This link expires on %s and cannot be renewed.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(candidateName, String.join("\n", assessmentNames.stream().map(n -> "  • " + n).toList()),
+                    candidateLink(accessToken), expiresAt.toLocalDate()));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send reallocation invitation to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendBuyerReallocationApproved(String toEmail, String buyerName, String oldCandidateName, String newCandidateName) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendBuyerReallocationApproved — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("HEAIL — Candidate reallocation approved");
+            msg.setText("""
+                    Dear %s,
+
+                    Your request to reallocate %s's assessment credit to %s has been
+                    approved. %s has been emailed a fresh invitation.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(buyerName, oldCandidateName, newCandidateName, newCandidateName));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send reallocation-approved email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendCandidateRetakeGranted(String toEmail, String candidateName, String assessmentName, String accessToken) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendCandidateRetakeGranted — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("HEAIL — You've been granted a retake");
+            msg.setText("""
+                    Dear %s,
+
+                    You've been granted a one-time retake of %s. Use your original
+                    access link to begin, or start here if that one has expired:
+                    %s
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(candidateName, assessmentName, candidateLink(accessToken)));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send retake-granted email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    @Async
+    public void sendBuyerCandidateExpired(String toEmail, String buyerName, String candidateName) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendBuyerCandidateExpired — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("HEAIL — A candidate's assessment window has expired");
+            msg.setText("""
+                    Dear %s,
+
+                    %s did not start their assessment within the 7-day access window,
+                    and the link has now expired permanently. To assign this
+                    assessment to someone else, purchase a new test license.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(buyerName, candidateName));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send candidate-expired email to {}: {}", toEmail, e.getMessage());
         }
     }
 }
