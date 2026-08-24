@@ -18,6 +18,7 @@ import java.util.Random;
 public class PartnerService {
 
     private static final String PURPOSE = "PARTNER_APPLICATION";
+    private static final long MAX_RESUME_BYTES = 500 * 1024;
 
     private final OtpTokenRepository otpRepo;
     private final PartnerApplicationRepository partnerRepo;
@@ -75,6 +76,8 @@ public class PartnerService {
         application.setConsentGiven(true);
 
         if (resume != null && !resume.isEmpty()) {
+            if (resume.getSize() > MAX_RESUME_BYTES)
+                throw new IllegalArgumentException("Attached file is more than 500 KB");
             application.setResumeFileName(resume.getOriginalFilename());
             try {
                 application.setResumeData(resume.getBytes());
