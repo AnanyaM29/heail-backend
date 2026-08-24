@@ -3,6 +3,7 @@ package com.example.heail_backend.security;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -44,6 +45,10 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/partners/**").permitAll()
                 // Public "Get in Touch" contact form — no account required.
                 .requestMatchers("/api/v1/contact/**").permitAll()
+                // Public — browsing the 7 HR pillars (pricing page) needs no
+                // account; only actually starting a purchase does (see
+                // HrAssessmentController.assessments).
+                .requestMatchers(HttpMethod.GET, "/api/v1/hr/assessments").permitAll()
                 // Gateway webhooks (Razorpay) are called by the gateway's own
                 // servers, never by a logged-in user — they can't send a JWT. Authenticity
                 // is verified inside PaymentWebhookController via each gateway's own

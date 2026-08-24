@@ -22,6 +22,7 @@ import java.util.Random;
 public class ContactService {
 
     private static final String PURPOSE = "CONTACT_US";
+    private static final int MAX_MESSAGE_WORDS = 200;
 
     private final OtpTokenRepository otpRepo;
     private final ContactMessageRepository contactRepo;
@@ -63,6 +64,8 @@ public class ContactService {
             throw new IllegalArgumentException("Code has expired");
         if (!token.getOtp().equals(otp))
             throw new IllegalArgumentException("Incorrect code");
+        if (message.trim().split("\\s+").length > MAX_MESSAGE_WORDS)
+            throw new IllegalArgumentException("Message must be " + MAX_MESSAGE_WORDS + " words or fewer");
 
         ContactMessage contact = new ContactMessage();
         contact.setName(name);

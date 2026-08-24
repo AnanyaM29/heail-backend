@@ -49,10 +49,12 @@ public class HrAssessmentService {
     private final SecureRandom secureRandom = new SecureRandom();
 
     /* ── The 7 pillars, with whether the caller currently holds an unused
-       entitlement for each ─────────────────────────────────────────── */
+       entitlement for each — email is null for an anonymous browser (the
+       pricing page shows this list with no login required), in which case
+       every pillar is simply not-entitled. ───────────────────────────── */
     @Transactional(readOnly = true)
     public List<HrAssessmentDto> listAssessments(String email) {
-        User user = requireUser(email);
+        User user = email != null ? requireUser(email) : null;
         return hrAssessmentRepo.findAllByOrderByIdAsc().stream().map(a -> {
             HrAssessmentDto dto = new HrAssessmentDto();
             dto.setId(a.getId());
@@ -60,7 +62,7 @@ public class HrAssessmentService {
             dto.setName(a.getName());
             dto.setQuestionCount(a.getQuestionCount());
             dto.setTimeMinutes(a.getTimeMinutes());
-            dto.setEntitled(entitlementRepo
+            dto.setEntitled(user != null && entitlementRepo
                     .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, productCodeFor(a.getId()))
                     .isPresent());
             return dto;

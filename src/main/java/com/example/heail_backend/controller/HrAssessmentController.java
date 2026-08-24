@@ -22,9 +22,14 @@ public class HrAssessmentController {
 
     private final HrAssessmentService hrAssessmentService;
 
+    // Public — browsing the 7 pillars (prices/names/question counts) needs no
+    // account; only actually starting a purchase does. auth is null for an
+    // anonymous caller, in which case every pillar just comes back
+    // not-entitled (see HrAssessmentService.listAssessments).
+    @PreAuthorize("permitAll()")
     @GetMapping("/assessments")
     public ResponseEntity<List<HrAssessmentDto>> assessments(Authentication auth) {
-        return ResponseEntity.ok(hrAssessmentService.listAssessments(auth.getName()));
+        return ResponseEntity.ok(hrAssessmentService.listAssessments(auth != null ? auth.getName() : null));
     }
 
     @PostMapping("/assessments/{assessmentId}/start")
