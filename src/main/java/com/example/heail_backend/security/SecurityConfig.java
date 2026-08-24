@@ -42,6 +42,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // Public partner-application form — no account required to apply.
                 .requestMatchers("/api/v1/partners/**").permitAll()
+                // Public "Get in Touch" contact form — no account required.
+                .requestMatchers("/api/v1/contact/**").permitAll()
                 // Gateway webhooks (Razorpay) are called by the gateway's own
                 // servers, never by a logged-in user — they can't send a JWT. Authenticity
                 // is verified inside PaymentWebhookController via each gateway's own

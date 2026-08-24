@@ -141,6 +141,65 @@ public class EmailService {
     }
 
     @Async
+    public void sendContactOtp(String toEmail, String otp) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendContactOtp — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("HEAIL — Verify Your Details for Get in Touch");
+            msg.setText("""
+                    Your HEAIL "Get in Touch" verification code is:
+
+                        %s
+
+                    Enter this code to send your message to us.
+                    This code expires in 15 minutes.
+
+                    If you did not request this, please ignore this email.
+
+                    — HEAIL Platform
+                    """.formatted(otp));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send contact OTP email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** Delivers a "Get in Touch" submission to HEAIL's own inbox, not the sender. */
+    @Async
+    public void sendContactMessageToHeail(String heailEmail, String name, String mobile, String email,
+                                           String city, String country, String message) {
+        if (heailEmail == null || heailEmail.isBlank()) {
+            log.info("Skipped sendContactMessageToHeail — no recipient configured");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(heailEmail);
+            msg.setReplyTo(email);
+            msg.setSubject("HEAIL — New Get in Touch message from " + name);
+            msg.setText("""
+                    New "Get in Touch" submission:
+
+                    Name: %s
+                    Mobile: %s
+                    Email: %s
+                    City: %s
+                    Country: %s
+
+                    Message:
+                    %s
+                    """.formatted(name, mobile, email, city, country, message));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send contact message notification: {}", e.getMessage());
+        }
+    }
+
+    @Async
     public void sendProfileOtp(String toEmail, String otp, String reason) {
         if (toEmail == null || toEmail.isBlank()) {
             log.info("Skipped sendProfileOtp — no recipient email");
