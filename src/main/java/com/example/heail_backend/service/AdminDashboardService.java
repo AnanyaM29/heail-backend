@@ -264,6 +264,7 @@ public class AdminDashboardService {
         dto.setAttemptNumber(session.getAttemptNumber());
         dto.setStartedAt(session.getStartedAt());
         dto.setCompletedAt(session.getCompletedAt());
+        dto.setQuestionIds(session.getQuestionIds());
         return dto;
     }
 

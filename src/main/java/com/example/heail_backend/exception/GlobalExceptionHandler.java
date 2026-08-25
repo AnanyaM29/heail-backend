@@ -9,6 +9,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -26,6 +27,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<Map<String, String>> handle(IllegalStateException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(body(e.getMessage()));
+    }
+
+    // Safety net for anything still over the raised multipart.max-file-size
+    // ceiling (application.properties) — same friendly message the 500KB
+    // business-rule check in PartnerService uses, so this only differs by
+    // catching files big enough to trip Spring's own framework-level limit.
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, String>> handle(MaxUploadSizeExceededException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body("Attached file is more than 500 KB"));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
