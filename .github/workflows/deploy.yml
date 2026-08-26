@@ -5,6 +5,10 @@ on:
     branches:
       - dev
 
+concurrency:
+  group: heail-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -18,6 +22,10 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
+
+            echo "=== Acquiring deployment lock ==="
+            exec 9>/tmp/heail-deploy.lock
+            flock -w 900 9
 
             echo "=== Pulling backend ==="
             cd ~/heail/heail-backend
@@ -33,11 +41,23 @@ jobs:
             cd ~/heail
             docker compose build backend frontend
 
-            echo "=== Restarting application ==="
-            docker compose down --remove-orphans
-            docker compose up -d --force-recreate
+            echo "=== Stopping application services ==="
+            docker compose stop backend frontend || true
+
+            echo "=== Removing application containers ==="
+            docker compose rm -f backend frontend || true
+
+            echo "=== Starting application services ==="
+            docker compose up -d backend frontend
+
+            echo "=== Waiting for backend health ==="
+            sleep 20
 
             echo "=== Checking containers ==="
-            docker compose ps
+            docker compose ps backend frontend
+
+            echo "=== Checking backend health ==="
+            docker exec heail-backend-1 sh -c \
+              'curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/actuator/health'
 
             echo "=== Deployment complete ==="
