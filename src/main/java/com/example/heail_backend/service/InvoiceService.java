@@ -21,6 +21,8 @@ import java.time.format.DateTimeFormatter;
 @RequiredArgsConstructor
 public class InvoiceService {
 
+    private static final String HEAIL_GSTIN = "08AGZPM5226F1ZY";
+
     private final EntityManager entityManager;
 
     /** Allocates the next sequential invoice number, formatted e.g. HEAIL-INV-000123.
@@ -49,6 +51,7 @@ public class InvoiceService {
             document.add(title);
             document.add(new Paragraph("Human Experience + AI Logic", mutedFont));
             document.add(new Paragraph("contact@heail.in", mutedFont));
+            document.add(new Paragraph("GSTIN: " + HEAIL_GSTIN, mutedFont));
             document.add(Chunk.NEWLINE);
 
             Paragraph invoiceHeading = new Paragraph("TAX INVOICE", headingFont);
