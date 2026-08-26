@@ -15,6 +15,7 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @Service
@@ -371,6 +372,125 @@ public class EmailService {
         }
     }
 
+    /** Sent to the recipient a superadmin targets a coupon at, at generation time. */
+    @Async
+    public void sendCouponCode(String toEmail, String code, int discountPercent, LocalDateTime expiresAt) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendCouponCode — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("Your HEAIL discount code");
+            msg.setText("""
+                    Hi,
+
+                    You've been sent a %d%% discount code for HEAIL: %s
+
+                    Enter it on the "Before you pay" step of checkout. It's valid only for
+                    this email address, good for one use, and expires on %s.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(discountPercent, code,
+                    expiresAt.format(DateTimeFormatter.ofPattern("dd MMM yyyy, h:mm a"))));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send coupon code email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** 100%-discount coupon redemption — no payment, no invoice, access already granted. */
+    @Async
+    public void sendLeaderFreeAccessGranted(String toEmail, String name) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendLeaderFreeAccessGranted — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("Your access is ready — begin The Gita Leader");
+            msg.setText("""
+                    Dear %s,
+
+                    A 100%% discount coupon was applied to your order — no payment was
+                    required, and no invoice was generated.
+
+                    Your Classic Assessment (50 questions, about 30 minutes, one sitting) is
+                    being finalised. You will be notified the moment it is ready to begin —
+                    please check your email and complete the test as soon as possible after that.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(name));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send leader free-access email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** 100%-discount coupon redemption — no payment, no invoice, access already granted. */
+    @Async
+    public void sendOrgFreeAccessGranted(String toEmail, String adminName, int employeeCount) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendOrgFreeAccessGranted — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("Your HEAIL Diagnostic is live — no charge");
+            msg.setText("""
+                    Dear %s,
+
+                    A 100%% discount coupon was applied to your order — no payment was
+                    required, and no invoice was generated.
+
+                    Assessments for %d employees have been dispatched to their email addresses.
+                    Please ask your employees to check their email and complete all four
+                    sections of the tests as soon as possible. Track live progress anytime
+                    at %s.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(adminName, employeeCount, frontendBaseUrl));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send org free-access email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
+    /** 100%-discount coupon redemption — no payment, no invoice, access already granted. */
+    @Async
+    public void sendHrFreeAccessGranted(String toEmail, String buyerName, int candidateCount) {
+        if (toEmail == null || toEmail.isBlank()) {
+            log.info("Skipped sendHrFreeAccessGranted — no recipient email");
+            return;
+        }
+        try {
+            SimpleMailMessage msg = new SimpleMailMessage();
+            msg.setTo(toEmail);
+            msg.setSubject("HR assessment invites sent — no charge");
+            msg.setText("""
+                    Dear %s,
+
+                    A 100%% discount coupon was applied to your order — no payment was
+                    required, and no invoice was generated.
+
+                    Invitations for %d candidate(s) have been dispatched to their email
+                    addresses.
+
+                    — Team HEAIL
+                    contact@heail.in
+                    """.formatted(buyerName, candidateCount));
+            mailSender.send(msg);
+        } catch (Exception e) {
+            log.error("Failed to send HR free-access email to {}: {}", toEmail, e.getMessage());
+        }
+    }
+
     @Async
     public void sendEmployeeInvitation(String toEmail, String employeeName, String organisationName) {
         if (toEmail == null || toEmail.isBlank()) {
@@ -385,7 +505,7 @@ public class EmailService {
                     Dear %s,
 
                     %s has enrolled you in the HEAIL 4-Pulse Diagnostic — four short
-                    assessments of about 23 minutes each. Your individual answers are
+                    assessments of about 30 minutes each. Your individual answers are
                     confidential and never shared with your organisation; results are
                     aggregate only. Please answer honestly — the outcome depends on it.
 
@@ -417,7 +537,7 @@ public class EmailService {
 
                     This is a reminder that %s has enrolled you in the HEAIL 4-Pulse
                     Diagnostic and you have not yet started. It takes about four short
-                    sittings of around 23 minutes each. Please sign in and begin as soon
+                    sittings of around 30 minutes each. Please sign in and begin as soon
                     as possible: %s/login
 
                     — Team HEAIL

@@ -47,6 +47,16 @@ public class Order {
     @Column(name = "invoice_number")
     String invoiceNumber;
 
+    // Set together when a coupon is redeemed on this order (see
+    // DiscountCouponService.applyToOrder) — amount/gstAmount are mutated in place
+    // to the discounted values at that point, so every existing total-computation
+    // call site (amount + gstAmount) picks up the discount with no further changes.
+    @Column(name = "coupon_code")
+    String couponCode;
+
+    @Column(name = "discount_percent")
+    Integer discountPercent;
+
     @Column(name = "draft_at", nullable = false, updatable = false)
     LocalDateTime draftAt;
 

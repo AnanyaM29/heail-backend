@@ -45,6 +45,7 @@ public class OrgOrderService {
     private final InvoiceService invoiceService;
     private final OrgReportService orgReportService;
     private final RazorpayService razorpayService;
+    private final DiscountCouponService couponService;
 
     @Value("${app.payments.razorpay-enabled:false}")
     private boolean razorpayEnabled;
@@ -272,6 +273,15 @@ public class OrgOrderService {
         return toOrgResponse(order);
     }
 
+    /* ── Apply a discount coupon before accepting the agreement ───── */
+    @Transactional
+    public OrgOrderResponse applyCoupon(UUID orderId, String email, String code) {
+        Order order = requireOwnedOrder(orderId, email);
+        couponService.applyToOrder(order, code, email);
+        order = orderRepo.save(order);
+        return toOrgResponse(order);
+    }
+
     /* ── Create a real Razorpay order once the agreement is accepted ── */
     @Transactional
     public OrgOrderResponse createRazorpayOrder(UUID orderId, String email) {
@@ -286,6 +296,12 @@ public class OrgOrderService {
         }
 
         BigDecimal total = order.getAmount().add(order.getGstAmount());
+        if (total.compareTo(BigDecimal.ZERO) == 0) {
+            log.info("Order {} is fully covered by coupon {} — skipping Razorpay", order.getId(), order.getCouponCode());
+            markPaidFromGateway(order, null);
+            return toOrgResponse(order);
+        }
+
         String razorpayOrderId = razorpayService.createOrder(total, order.getCurrency(), order.getId().toString());
 
         order.setStatus(OrderStatus.PAYMENT_INITIATED);
@@ -355,17 +371,23 @@ public class OrgOrderService {
             order.setMetadata(metadata);
         }
         order.setPaidAt(LocalDateTime.now());
-        order.setInvoiceNumber(invoiceService.nextInvoiceNumber());
+
+        BigDecimal total = order.getAmount().add(order.getGstAmount());
+        boolean freeViaCoupon = total.compareTo(BigDecimal.ZERO) == 0;
+        if (!freeViaCoupon) order.setInvoiceNumber(invoiceService.nextInvoiceNumber());
         order = orderRepo.save(order);
 
         List<OrderEmployee> employees = orderEmployeeRepo.findByOrder(order);
         fulfil(order, employees);
 
-        BigDecimal total = order.getAmount().add(order.getGstAmount());
-        String amountDisplay = order.getCurrency() + " " + total.setScale(2, RoundingMode.HALF_UP);
-        byte[] invoicePdf = invoiceService.generate(order, order.getUser().getName(), order.getUser().getEmail());
-        emailService.sendOrgPaymentSuccess(order.getUser().getEmail(), order.getUser().getName(),
-                amountDisplay, employees.size(), order.getGatewayOrderRef(), invoicePdf, order.getInvoiceNumber());
+        if (freeViaCoupon) {
+            emailService.sendOrgFreeAccessGranted(order.getUser().getEmail(), order.getUser().getName(), employees.size());
+        } else {
+            String amountDisplay = order.getCurrency() + " " + total.setScale(2, RoundingMode.HALF_UP);
+            byte[] invoicePdf = invoiceService.generate(order, order.getUser().getName(), order.getUser().getEmail());
+            emailService.sendOrgPaymentSuccess(order.getUser().getEmail(), order.getUser().getName(),
+                    amountDisplay, employees.size(), order.getGatewayOrderRef(), invoicePdf, order.getInvoiceNumber());
+        }
     }
 
     @Transactional
@@ -488,6 +510,8 @@ public class OrgOrderService {
         res.setCreatedAt(order.getDraftAt());
         res.setMetadata(order.getMetadata());
         res.setRazorpayKeyId(razorpayService.getKeyId());
+        res.setCouponCode(order.getCouponCode());
+        res.setDiscountPercent(order.getDiscountPercent());
         return res;
     }
 

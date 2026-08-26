@@ -45,7 +45,9 @@ public class PulseAssessmentController {
     }
 
     @PostMapping("/{sessionId}/submit")
-    public ResponseEntity<PulseSubmitResponse> submit(@PathVariable UUID sessionId, Authentication auth) {
-        return ResponseEntity.ok(pulseService.submit(sessionId, auth.getName()));
+    public ResponseEntity<PulseSubmitResponse> submit(@PathVariable UUID sessionId,
+                                                       @RequestParam(defaultValue = "false") boolean forced,
+                                                       Authentication auth) {
+        return ResponseEntity.ok(pulseService.submit(sessionId, auth.getName(), forced));
     }
 }

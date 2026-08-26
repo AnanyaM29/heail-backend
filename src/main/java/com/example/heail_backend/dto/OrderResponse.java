@@ -22,6 +22,10 @@ public class OrderResponse {
     LocalDateTime paidAt;
     LocalDateTime createdAt;
     Map<String, String> metadata;
+    // Set once a coupon has been redeemed on this order (see DiscountCouponService) —
+    // null/absent means no coupon applied.
+    String couponCode;
+    Integer discountPercent;
     // Public by design — only razorpay.key-secret is sensitive. Included here so
     // the frontend doesn't need its own separately-configured copy to open Checkout.js.
     String razorpayKeyId;

@@ -38,6 +38,7 @@ public class OrderService {
     private final EntitlementRepository entitlementRepo;
     private final RazorpayService razorpayService;
     private final InvoiceService invoiceService;
+    private final DiscountCouponService couponService;
 
     @Value("${app.payments.razorpay-enabled:false}")
     private boolean razorpayEnabled;
@@ -120,6 +121,15 @@ public class OrderService {
         return toResponse(order);
     }
 
+    /* ── Apply a discount coupon before accepting the agreement ───── */
+    @Transactional
+    public OrderResponse applyCoupon(UUID orderId, String email, String code) {
+        Order order = requireOwnedOrder(orderId, email);
+        couponService.applyToOrder(order, code, email);
+        order = orderRepo.save(order);
+        return toResponse(order);
+    }
+
     /* ── Create a real Razorpay order once the agreement is accepted ── */
     @Transactional
     public OrderResponse createRazorpayOrder(UUID orderId, String email) {
@@ -134,6 +144,12 @@ public class OrderService {
         }
 
         BigDecimal total = order.getAmount().add(order.getGstAmount());
+        if (total.compareTo(BigDecimal.ZERO) == 0) {
+            log.info("Order {} is fully covered by coupon {} — skipping Razorpay", order.getId(), order.getCouponCode());
+            markPaidFromGateway(order, null);
+            return toResponse(order);
+        }
+
         String razorpayOrderId = razorpayService.createOrder(total, order.getCurrency(), order.getId().toString());
 
         order.setStatus(OrderStatus.PAYMENT_INITIATED);
@@ -203,7 +219,10 @@ public class OrderService {
             order.setMetadata(metadata);
         }
         order.setPaidAt(LocalDateTime.now());
-        order.setInvoiceNumber(invoiceService.nextInvoiceNumber());
+
+        BigDecimal total = order.getAmount().add(order.getGstAmount());
+        boolean freeViaCoupon = total.compareTo(BigDecimal.ZERO) == 0;
+        if (!freeViaCoupon) order.setInvoiceNumber(invoiceService.nextInvoiceNumber());
         order = orderRepo.save(order);
 
         Entitlement entitlement = new Entitlement();
@@ -214,11 +233,14 @@ public class OrderService {
         entitlement.setUsed(false);
         entitlementRepo.save(entitlement);
 
-        BigDecimal total = order.getAmount().add(order.getGstAmount());
-        String amountDisplay = order.getCurrency() + " " + total.setScale(2, RoundingMode.HALF_UP);
-        byte[] invoicePdf = invoiceService.generate(order, order.getUser().getName(), order.getUser().getEmail());
-        emailService.sendLeaderPaymentSuccess(order.getUser().getEmail(), order.getUser().getName(),
-                amountDisplay, order.getGatewayOrderRef(), invoicePdf, order.getInvoiceNumber());
+        if (freeViaCoupon) {
+            emailService.sendLeaderFreeAccessGranted(order.getUser().getEmail(), order.getUser().getName());
+        } else {
+            String amountDisplay = order.getCurrency() + " " + total.setScale(2, RoundingMode.HALF_UP);
+            byte[] invoicePdf = invoiceService.generate(order, order.getUser().getName(), order.getUser().getEmail());
+            emailService.sendLeaderPaymentSuccess(order.getUser().getEmail(), order.getUser().getName(),
+                    amountDisplay, order.getGatewayOrderRef(), invoicePdf, order.getInvoiceNumber());
+        }
     }
 
     @Transactional
@@ -263,6 +285,8 @@ public class OrderService {
         res.setCreatedAt(order.getDraftAt());
         res.setMetadata(order.getMetadata());
         res.setRazorpayKeyId(razorpayService.getKeyId());
+        res.setCouponCode(order.getCouponCode());
+        res.setDiscountPercent(order.getDiscountPercent());
         return res;
     }
 }

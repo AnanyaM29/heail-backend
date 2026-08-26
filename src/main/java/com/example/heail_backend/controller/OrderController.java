@@ -1,6 +1,7 @@
 package com.example.heail_backend.controller;
 
 import com.example.heail_backend.dto.AcceptAgreementRequest;
+import com.example.heail_backend.dto.ApplyCouponRequest;
 import com.example.heail_backend.dto.CreateOrderRequest;
 import com.example.heail_backend.dto.OrderDetailsRequest;
 import com.example.heail_backend.dto.OrderResponse;
@@ -48,6 +49,13 @@ public class OrderController {
                                                            @Valid @RequestBody AcceptAgreementRequest req,
                                                            Authentication auth) {
         return ResponseEntity.ok(orderService.acceptAgreement(id, auth.getName(), req.getVersion()));
+    }
+
+    @PostMapping("/{id}/apply-coupon")
+    public ResponseEntity<OrderResponse> applyCoupon(@PathVariable UUID id,
+                                                       @Valid @RequestBody ApplyCouponRequest req,
+                                                       Authentication auth) {
+        return ResponseEntity.ok(orderService.applyCoupon(id, auth.getName(), req.getCode()));
     }
 
     @PostMapping("/{id}/create-razorpay-order")

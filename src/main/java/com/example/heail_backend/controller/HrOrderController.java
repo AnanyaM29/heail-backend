@@ -71,6 +71,13 @@ public class HrOrderController {
         return ResponseEntity.ok(hrOrderService.acceptAgreement(id, auth.getName(), req.getVersion()));
     }
 
+    @PostMapping("/{id}/apply-coupon")
+    public ResponseEntity<OrderResponse> applyCoupon(@PathVariable UUID id,
+                                                       @Valid @RequestBody ApplyCouponRequest req,
+                                                       Authentication auth) {
+        return ResponseEntity.ok(hrOrderService.applyCoupon(id, auth.getName(), req.getCode()));
+    }
+
     @PostMapping("/{id}/create-razorpay-order")
     public ResponseEntity<OrderResponse> createRazorpayOrder(@PathVariable UUID id, Authentication auth) {
         return ResponseEntity.ok(hrOrderService.createRazorpayOrder(id, auth.getName()));

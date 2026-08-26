@@ -54,8 +54,10 @@ public class AssessmentController {
     }
 
     @PostMapping("/{sessionId}/submit")
-    public ResponseEntity<LeaderResultResponse> submit(@PathVariable UUID sessionId, Authentication auth) {
-        return ResponseEntity.ok(assessmentService.submit(sessionId, auth.getName()));
+    public ResponseEntity<LeaderResultResponse> submit(@PathVariable UUID sessionId,
+                                                        @RequestParam(defaultValue = "false") boolean forced,
+                                                        Authentication auth) {
+        return ResponseEntity.ok(assessmentService.submit(sessionId, auth.getName(), forced));
     }
 
     @GetMapping("/results")

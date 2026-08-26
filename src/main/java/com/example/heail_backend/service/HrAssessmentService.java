@@ -188,14 +188,18 @@ public class HrAssessmentService {
 
     /* ── Submit: score, roll up competency/skill-category, persist ── */
     @Transactional
-    public HrResultResponse submit(UUID sessionId, String email) {
+    public HrResultResponse submit(UUID sessionId, String email, boolean forced) {
         AssessmentSession session = requireOwnedHrSession(sessionId, email);
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This assessment has already been submitted");
 
         List<Answer> answers = answerRepo.findBySessionId(sessionId);
         int total = session.getQuestionIds().size();
-        if (answers.size() < total)
+        // A forced submit (time ran out client-side) is only honoured once the deadline has
+        // genuinely passed server-side. Scoring below only ever sums over `answers`, so an
+        // incomplete forced submit naturally scores just the questions actually answered.
+        boolean timeExpired = session.getDeadlineAt() != null && LocalDateTime.now().isAfter(session.getDeadlineAt());
+        if (answers.size() < total && !(forced && timeExpired))
             throw new IllegalArgumentException(
                     "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
 
@@ -241,8 +245,8 @@ public class HrAssessmentService {
         result.setOverallScore((short) overall);
         result.setCompetencyScores(competencyScores);
         result.setSkillCategoryScores(skillCategoryScores);
-        result.setStrongestCompetency(questionsById.get(strongestAnswer.getQuestionId()).getCompetencyCode());
-        result.setWeakestCompetency(questionsById.get(weakestAnswer.getQuestionId()).getCompetencyCode());
+        if (strongestAnswer != null) result.setStrongestCompetency(questionsById.get(strongestAnswer.getQuestionId()).getCompetencyCode());
+        if (weakestAnswer != null) result.setWeakestCompetency(questionsById.get(weakestAnswer.getQuestionId()).getCompetencyCode());
         result = hrResultRepo.save(result);
 
         session.setStatus(SessionStatus.COMPLETED);

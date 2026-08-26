@@ -11,6 +11,6 @@ public class AnswerRequest {
     String questionId;
 
     @NotBlank
-    @Pattern(regexp = "[A-DN]", message = "selectedOption must be one of A, B, C, D, or N (not applicable)")
+    @Pattern(regexp = "[A-D]", message = "selectedOption must be one of A, B, C, or D")
     String selectedOption;
 }

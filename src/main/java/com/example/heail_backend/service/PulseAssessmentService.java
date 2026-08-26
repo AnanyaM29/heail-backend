@@ -201,14 +201,18 @@ public class PulseAssessmentService {
 
     /* ── Submit: lock the session, score per-section, trigger the org report check ── */
     @Transactional
-    public PulseSubmitResponse submit(UUID sessionId, String email) {
+    public PulseSubmitResponse submit(UUID sessionId, String email, boolean forced) {
         AssessmentSession session = requireOwnedSession(sessionId, email);
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This Pulse has already been submitted");
 
         int total = session.getQuestionIds().size();
         List<Answer> answers = answerRepo.findBySessionId(sessionId);
-        if (answers.size() < total)
+        // A forced submit (time ran out client-side) is only honoured once the deadline has
+        // genuinely passed server-side. scoreSections() below only ever scores over `answers`,
+        // so an incomplete forced submit naturally scores just the questions actually answered.
+        boolean timeExpired = session.getDeadlineAt() != null && LocalDateTime.now().isAfter(session.getDeadlineAt());
+        if (answers.size() < total && !(forced && timeExpired))
             throw new IllegalArgumentException(
                     "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
 

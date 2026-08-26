@@ -1,6 +1,7 @@
 package com.example.heail_backend.controller;
 
 import com.example.heail_backend.dto.AcceptAgreementRequest;
+import com.example.heail_backend.dto.ApplyCouponRequest;
 import com.example.heail_backend.dto.CreateOrderRequest;
 import com.example.heail_backend.dto.EmployeeRowRequest;
 import com.example.heail_backend.dto.OrgMonitorResponse;
@@ -68,6 +69,13 @@ public class OrgOrderController {
                                                               @Valid @RequestBody AcceptAgreementRequest req,
                                                               Authentication auth) {
         return ResponseEntity.ok(orgOrderService.acceptAgreement(id, auth.getName(), req.getVersion()));
+    }
+
+    @PostMapping("/{id}/apply-coupon")
+    public ResponseEntity<OrgOrderResponse> applyCoupon(@PathVariable UUID id,
+                                                          @Valid @RequestBody ApplyCouponRequest req,
+                                                          Authentication auth) {
+        return ResponseEntity.ok(orgOrderService.applyCoupon(id, auth.getName(), req.getCode()));
     }
 
     // Payment endpoints are ORG_ADMIN/SUPERADMIN-only (unlike the rest of this

@@ -156,14 +156,19 @@ public class AssessmentService {
 
     /* ── Submit: score, band, persist, no approval gate ───────────── */
     @Transactional
-    public LeaderResultResponse submit(UUID sessionId, String email) {
+    public LeaderResultResponse submit(UUID sessionId, String email, boolean forced) {
         AssessmentSession session = requireOwnedSession(sessionId, email);
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This assessment has already been submitted");
 
         List<Answer> answers = answerRepo.findBySessionId(sessionId);
         int total = session.getQuestionIds().size();
-        if (answers.size() < total)
+        // A forced submit (time ran out client-side) is only honoured once the deadline has
+        // genuinely passed server-side — otherwise a client could submit early with `forced=true`
+        // to lock in a partial score. Scoring below already only ever sums over `answers`, so an
+        // incomplete forced submit naturally scores just the questions actually answered.
+        boolean timeExpired = session.getDeadlineAt() != null && LocalDateTime.now().isAfter(session.getDeadlineAt());
+        if (answers.size() < total && !(forced && timeExpired))
             throw new IllegalArgumentException(
                     "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
 
@@ -193,8 +198,8 @@ public class AssessmentService {
         result.setOverallScore((short) overall);
         result.setBand(bandFor(overall));
         result.setDomainScores(domainScores);
-        result.setStrongestPrinciple(questionsById.get(strongestAnswer.getQuestionId()).getPrincipleCode());
-        result.setWeakestPrinciple(questionsById.get(weakestAnswer.getQuestionId()).getPrincipleCode());
+        if (strongestAnswer != null) result.setStrongestPrinciple(questionsById.get(strongestAnswer.getQuestionId()).getPrincipleCode());
+        if (weakestAnswer != null) result.setWeakestPrinciple(questionsById.get(weakestAnswer.getQuestionId()).getPrincipleCode());
         result = leaderResultRepo.save(result);
 
         session.setStatus(SessionStatus.COMPLETED);
@@ -283,7 +288,7 @@ public class AssessmentService {
                 .findByQuestionIdIn(answers.stream().map(Answer::getQuestionId).toList()).stream()
                 .collect(Collectors.toMap(LeaderQuestionBank::getQuestionId, q -> q));
 
-        Set<String> wanted = Set.of(principleCodes);
+        Set<String> wanted = Arrays.stream(principleCodes).filter(Objects::nonNull).collect(Collectors.toSet());
         Map<String, String> result = new HashMap<>();
         for (Answer a : answers) {
             LeaderQuestionBank q = questionsById.get(a.getQuestionId());
