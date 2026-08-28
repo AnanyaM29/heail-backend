@@ -73,6 +73,12 @@ public class AdminDashboardController {
         return ResponseEntity.ok(Map.of("message", "User unblacklisted"));
     }
 
+    @PatchMapping("/users/{id}/fee-discount")
+    public ResponseEntity<?> setFeeDiscount(@PathVariable UUID id, @RequestParam int percent) {
+        adminDashboardService.setFeeDiscount(id, percent);
+        return ResponseEntity.ok(Map.of("message", percent > 0 ? "Fee discount set to " + percent + "%" : "Fee discount removed"));
+    }
+
     @DeleteMapping("/users/{id}")
     public ResponseEntity<?> removeUser(@PathVariable UUID id) {
         adminDashboardService.removeUser(id);
@@ -99,6 +105,12 @@ public class AdminDashboardController {
     @PostMapping("/orders/{orderId}/resend-invoice")
     public ResponseEntity<?> resendInvoice(@PathVariable UUID orderId) {
         adminDashboardService.resendInvoice(orderId);
+        return ResponseEntity.ok(Map.of("message", "Invoice resent"));
+    }
+
+    @PostMapping("/tests/{sessionId}/resend-invoice")
+    public ResponseEntity<?> resendInvoiceForTest(@PathVariable UUID sessionId) {
+        adminDashboardService.resendInvoiceForSession(sessionId);
         return ResponseEntity.ok(Map.of("message", "Invoice resent"));
     }
 

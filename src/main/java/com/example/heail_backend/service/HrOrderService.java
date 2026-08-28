@@ -126,6 +126,19 @@ public class HrOrderService {
         BigDecimal gstAmount = amount.multiply(pricing.getGstPct()).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
         order.setAmount(amount);
         order.setGstAmount(gstAmount);
+        applyFeeDiscount(order);
+    }
+
+    /** Admin-granted, permanent fee discount (see User.feeDiscountPercent) — scales the
+     *  order's freshly-computed price down by this percentage. Always called right after
+     *  amount/gstAmount are recomputed from scratch (never on a value that might already
+     *  be discounted), so repeat calls can't compound the discount. */
+    private void applyFeeDiscount(Order order) {
+        int pct = order.getUser().getFeeDiscountPercent();
+        if (pct <= 0) return;
+        BigDecimal factor = BigDecimal.valueOf(100 - pct).divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
+        order.setAmount(order.getAmount().multiply(factor).setScale(2, RoundingMode.HALF_UP));
+        order.setGstAmount(order.getGstAmount().multiply(factor).setScale(2, RoundingMode.HALF_UP));
     }
 
     /* ── Replace the order's candidate roster, all-or-nothing — every

@@ -56,6 +56,14 @@ public class User {
     @Column(name = "deleted_at")
     LocalDateTime deletedAt;
 
+    // Admin-granted, permanent — unlike a coupon (single order, one use, then dead), this
+    // discounts every future order this account creates by this percentage (0-100, 0 =
+    // no discount, 100 = fully waived) until an admin changes it back. Has a DB default
+    // so ddl-auto=update can add this NOT NULL column to a table that already has rows.
+    // See getOrCreateDraftOrder/repriceFor* in OrderService/OrgOrderService/HrOrderService.
+    @Column(name = "fee_discount_percent", columnDefinition = "integer not null default 0")
+    int feeDiscountPercent = 0;
+
     @PrePersist
     void prePersist() { this.createdAt = LocalDateTime.now(); }
 }

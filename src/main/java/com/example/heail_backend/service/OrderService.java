@@ -62,6 +62,10 @@ public class OrderService {
         // of being able to start a fresh attempt.
         boolean reusable = latest != null && latest.getStatus() == OrderStatus.DRAFT;
 
+        // Not re-discounted here on purpose: a reused draft's price was already fixed at
+        // creation time (see applyFeeDiscount below), same as this codebase's existing
+        // rule that a reused draft never gets repriced just because it's re-fetched — a
+        // discount granted after the draft existed only takes effect on a fresh one.
         if (reusable && currency.equals(latest.getCurrency())) return toResponse(latest);
 
         PricingItem pricing = pricingRepo.findByProductCodeAndCurrencyAndActiveTrue(LEADER_CLASSIC_PRODUCT, currency)
@@ -81,8 +85,21 @@ public class OrderService {
         order.setGstAmount(gstAmount);
         order.setCurrency(pricing.getCurrency());
         order.setStatus(OrderStatus.DRAFT);
+        applyFeeDiscount(order, user);
         order = orderRepo.save(order);
         return toResponse(order);
+    }
+
+    /** Admin-granted, permanent fee discount (see User.feeDiscountPercent) — scales the
+     *  order's freshly-computed price down by this percentage. Only ever called where
+     *  amount/gstAmount were just computed from PricingItem, never on an already-priced
+     *  reused draft, so repeat calls can't compound the discount. */
+    private void applyFeeDiscount(Order order, User user) {
+        if (user.getFeeDiscountPercent() <= 0) return;
+        BigDecimal factor = BigDecimal.valueOf(100 - user.getFeeDiscountPercent())
+                .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
+        order.setAmount(order.getAmount().multiply(factor).setScale(2, RoundingMode.HALF_UP));
+        order.setGstAmount(order.getGstAmount().multiply(factor).setScale(2, RoundingMode.HALF_UP));
     }
 
     /* ── Optional purchase-time context (designation / organisation) ── */

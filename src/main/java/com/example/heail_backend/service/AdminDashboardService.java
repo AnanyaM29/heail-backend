@@ -12,7 +12,9 @@ import com.example.heail_backend.entity.OrderStatus;
 import com.example.heail_backend.entity.Organisation;
 import com.example.heail_backend.entity.PartnerApplication;
 import com.example.heail_backend.entity.User;
+import com.example.heail_backend.entity.Entitlement;
 import com.example.heail_backend.repository.AssessmentSessionRepository;
+import com.example.heail_backend.repository.EntitlementRepository;
 import com.example.heail_backend.repository.LeaderResultRepository;
 import com.example.heail_backend.repository.OrderRepository;
 import com.example.heail_backend.repository.PartnerApplicationRepository;
@@ -47,6 +49,7 @@ public class AdminDashboardService {
     private final InvoiceService invoiceService;
     private final OrgReportService orgReportService;
     private final OrgReportPdfService orgReportPdfService;
+    private final EntitlementRepository entitlementRepo;
 
     @Transactional(readOnly = true)
     public List<AdminTestSessionDto> listTests(int months) {
@@ -103,6 +106,19 @@ public class AdminDashboardService {
         userRepo.save(user);
     }
 
+    /* ── Permanent fee discount — every future order this account creates is
+       discounted by this percentage (0-100) until an admin changes it back
+       (see User.feeDiscountPercent and the repricing methods in
+       OrderService/OrgOrderService/HrOrderService that check it) ── */
+    @Transactional
+    public void setFeeDiscount(UUID userId, int percent) {
+        if (percent < 0 || percent > 100)
+            throw new IllegalArgumentException("Discount must be between 0 and 100");
+        User user = requireUser(userId);
+        user.setFeeDiscountPercent(percent);
+        userRepo.save(user);
+    }
+
     /* ── Resend results: whichever kind of result this user actually has ── */
     @Transactional
     public void resendResults(UUID userId) {
@@ -152,6 +168,30 @@ public class AdminDashboardService {
         String amountDisplay = order.getCurrency() + " " + total.setScale(2, RoundingMode.HALF_UP);
         byte[] invoicePdf = invoiceService.generate(order, user.getName(), user.getEmail());
         emailService.sendInvoice(user.getEmail(), user.getName(), amountDisplay, invoicePdf, order.getInvoiceNumber());
+    }
+
+    /**
+     * Resends the invoice for whichever order paid for a given test session — from the
+     * Tests tab, so admin doesn't have to cross-reference the Payments tab by hand.
+     * Org/Pulse sessions carry the order directly; Leader and HR sessions don't (their
+     * AssessmentSession.order is always null — see the entity), so those two resolve it
+     * via the Entitlement that was consumed to start the session instead, which always
+     * does carry the order it came from.
+     */
+    @Transactional
+    public void resendInvoiceForSession(UUID sessionId) {
+        AssessmentSession session = sessionRepo.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Test session not found"));
+        Order order = resolveOrderForSession(session);
+        resendInvoice(order.getId());
+    }
+
+    private Order resolveOrderForSession(AssessmentSession session) {
+        if (session.getOrder() != null) return session.getOrder();
+        return entitlementRepo.findFirstByUserAndProductCodeAndUsedTrueOrderByCreatedAtDesc(
+                        session.getUser(), session.getProductCode())
+                .map(Entitlement::getOrder)
+                .orElseThrow(() -> new IllegalArgumentException("No order found for this test session"));
     }
 
     /* ── Payment reminders for orders not yet paid ────────────────── */
@@ -305,6 +345,7 @@ public class AdminDashboardService {
         dto.setActive(user.isActive());
         dto.setBlacklistedAt(user.getBlacklistedAt());
         dto.setDeletedAt(user.getDeletedAt());
+        dto.setFeeDiscountPercent(user.getFeeDiscountPercent());
         return dto;
     }
 }

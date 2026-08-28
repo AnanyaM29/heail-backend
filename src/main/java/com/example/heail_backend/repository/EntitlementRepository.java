@@ -10,5 +10,6 @@ import java.util.UUID;
 
 public interface EntitlementRepository extends JpaRepository<Entitlement, UUID> {
     Optional<Entitlement> findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(User user, String productCode);
+    Optional<Entitlement> findFirstByUserAndProductCodeAndUsedTrueOrderByCreatedAtDesc(User user, String productCode);
     List<Entitlement> findByUser(User user);
 }
