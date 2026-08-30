@@ -16,24 +16,70 @@ import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 
-/** Generates a simple GST invoice PDF for a paid order. */
+/**
+ * Generates GST invoice PDFs for paid orders, and owns the shared invoice-number
+ * counter (Postgres sequence {@code invoice_seq}) that both website-generated and
+ * manual/offline invoices draw from, so numbers never collide.
+ */
 @Service
 @RequiredArgsConstructor
 public class InvoiceService {
 
     private static final String HEAIL_GSTIN = "08AGZPM5226F1ZY";
 
+    /** Change this (and redeploy) to switch the invoice-number format, e.g. at a financial-year rollover. */
+    private static final String INVOICE_PREFIX = "HEAIL-INV-";
+    private static final int INVOICE_PAD = 6;
+
     private final EntityManager entityManager;
 
-    /** Allocates the next sequential invoice number, formatted e.g. HEAIL-INV-000123.
-     *  Self-healing: creates the backing sequence on first use if it doesn't exist yet,
-     *  since it's a raw Postgres sequence Hibernate's ddl-auto=update never creates. */
+    private String format(long n) {
+        return INVOICE_PREFIX + String.format("%0" + INVOICE_PAD + "d", n);
+    }
+
+    private void ensureSequence() {
+        entityManager.createNativeQuery("CREATE SEQUENCE IF NOT EXISTS invoice_seq").executeUpdate();
+    }
+
+    /**
+     * Allocates the next invoice number and advances the shared counter. Called by the
+     * website on payment and by the superadmin endpoint when cutting a manual invoice —
+     * one sequence, so a manual and an automatic invoice can never share a number.
+     */
     @Transactional
     public String nextInvoiceNumber() {
-        entityManager.createNativeQuery("CREATE SEQUENCE IF NOT EXISTS invoice_seq").executeUpdate();
+        ensureSequence();
         Number next = (Number) entityManager.createNativeQuery("SELECT nextval('invoice_seq')").getSingleResult();
-        return "HEAIL-INV-" + String.format("%06d", next.longValue());
+        return format(next.longValue());
     }
+
+    /** Current counter state for the superadmin screen — does not advance it. */
+    @Transactional
+    public Counter peekCounter() {
+        ensureSequence();
+        Object[] row = (Object[]) entityManager
+                .createNativeQuery("SELECT last_value, is_called FROM invoice_seq").getSingleResult();
+        long lastValue = ((Number) row[0]).longValue();
+        boolean isCalled = (Boolean) row[1];
+        long nextValue = isCalled ? lastValue + 1 : lastValue;
+        return new Counter(isCalled ? lastValue : null, nextValue, format(nextValue));
+    }
+
+    /**
+     * Manually sets the counter so the next invoice number is {@code nextValue}
+     * (e.g. after issuing a batch of manual invoices, or a financial-year reset).
+     */
+    @Transactional
+    public Counter setCounter(long nextValue) {
+        if (nextValue < 1) throw new IllegalArgumentException("nextValue must be >= 1");
+        ensureSequence();
+        // nextValue is a validated long — safe to inline; ALTER SEQUENCE takes no bind params.
+        entityManager.createNativeQuery("ALTER SEQUENCE invoice_seq RESTART WITH " + nextValue).executeUpdate();
+        return peekCounter();
+    }
+
+    /** @param lastUsed null if no number has been issued yet. */
+    public record Counter(Long lastUsed, long nextValue, String nextNumber) {}
 
     public byte[] generate(Order order, String customerName, String customerEmail) {
         try {

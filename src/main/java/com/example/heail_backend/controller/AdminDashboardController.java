@@ -4,6 +4,7 @@ import com.example.heail_backend.dto.AdminPartnerDto;
 import com.example.heail_backend.dto.AdminPaymentDto;
 import com.example.heail_backend.dto.AdminTestSessionDto;
 import com.example.heail_backend.dto.AdminUserDto;
+import com.example.heail_backend.dto.PagedResponse;
 import com.example.heail_backend.service.AdminDashboardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
@@ -42,23 +43,38 @@ public class AdminDashboardController {
     private final AdminDashboardService adminDashboardService;
 
     @GetMapping("/tests")
-    public ResponseEntity<List<AdminTestSessionDto>> tests(@RequestParam(defaultValue = "3") int months) {
-        return ResponseEntity.ok(adminDashboardService.listTests(months));
+    public ResponseEntity<PagedResponse<AdminTestSessionDto>> tests(
+            @RequestParam(defaultValue = "3") int months,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String q) {
+        return ResponseEntity.ok(adminDashboardService.listTests(months, page, size, q));
     }
 
     @GetMapping("/payments")
-    public ResponseEntity<List<AdminPaymentDto>> payments(@RequestParam(defaultValue = "12") int months) {
-        return ResponseEntity.ok(adminDashboardService.listPayments(months));
+    public ResponseEntity<PagedResponse<AdminPaymentDto>> payments(
+            @RequestParam(defaultValue = "12") int months,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String q) {
+        return ResponseEntity.ok(adminDashboardService.listPayments(months, page, size, q));
     }
 
     @GetMapping("/users")
-    public ResponseEntity<List<AdminUserDto>> users() {
-        return ResponseEntity.ok(adminDashboardService.listUsers());
+    public ResponseEntity<PagedResponse<AdminUserDto>> users(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String q) {
+        return ResponseEntity.ok(adminDashboardService.listUsers(page, size, q));
     }
 
     @GetMapping("/logins")
-    public ResponseEntity<List<AdminUserDto>> logins(@RequestParam(defaultValue = "12") int months) {
-        return ResponseEntity.ok(adminDashboardService.listLogins(months));
+    public ResponseEntity<PagedResponse<AdminUserDto>> logins(
+            @RequestParam(defaultValue = "12") int months,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String q) {
+        return ResponseEntity.ok(adminDashboardService.listLogins(months, page, size, q));
     }
 
     @PatchMapping("/users/{id}/blacklist")
@@ -127,8 +143,11 @@ public class AdminDashboardController {
     }
 
     @GetMapping("/partners")
-    public ResponseEntity<List<AdminPartnerDto>> partners() {
-        return ResponseEntity.ok(adminDashboardService.listPartners());
+    public ResponseEntity<PagedResponse<AdminPartnerDto>> partners(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String q) {
+        return ResponseEntity.ok(adminDashboardService.listPartners(page, size, q));
     }
 
     @GetMapping("/partners/{id}/resume")

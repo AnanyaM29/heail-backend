@@ -5,6 +5,7 @@ import com.example.heail_backend.dto.AdminPaymentDto;
 import com.example.heail_backend.dto.AdminTestSessionDto;
 import com.example.heail_backend.dto.AdminUserDto;
 import com.example.heail_backend.dto.OrgReportResponse;
+import com.example.heail_backend.dto.PagedResponse;
 import com.example.heail_backend.entity.AssessmentSession;
 import com.example.heail_backend.entity.LeaderResult;
 import com.example.heail_backend.entity.Order;
@@ -22,6 +23,8 @@ import com.example.heail_backend.repository.RefreshTokenRepository;
 import com.example.heail_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,24 +54,45 @@ public class AdminDashboardService {
     private final OrgReportPdfService orgReportPdfService;
     private final EntitlementRepository entitlementRepo;
 
+    /**
+     * These four list* methods used to load the *entire* table into memory
+     * (findAll..., stream, map to DTO) on every admin-panel page load, while
+     * the frontend re-paginated the full result client-side — meaning every
+     * page view against a growing table costs strictly more work over time,
+     * with no bound. Pagination and search are now pushed down to Postgres
+     * (LIMIT/OFFSET + a WHERE clause in the repository query) so only the
+     * page actually being viewed is ever fetched or mapped to a DTO —
+     * see UserRepository.searchActive/searchLogins, AssessmentSessionRepository.search,
+     * OrderRepository.search, and PartnerApplicationRepository.search.
+     */
     @Transactional(readOnly = true)
-    public List<AdminTestSessionDto> listTests(int months) {
+    public PagedResponse<AdminTestSessionDto> listTests(int months, int page, int size, String q) {
         LocalDateTime cutoff = LocalDateTime.now().minusMonths(months);
-        return sessionRepo.findByStartedAtAfterOrderByStartedAtDesc(cutoff).stream()
-                .map(this::toTestDto).toList();
+        return PagedResponse.of(sessionRepo.search(cutoff, sanitize(q), pageOf(page, size, Sort.by("startedAt").descending()))
+                .map(this::toTestDto));
     }
 
     @Transactional(readOnly = true)
-    public List<AdminPaymentDto> listPayments(int months) {
+    public PagedResponse<AdminPaymentDto> listPayments(int months, int page, int size, String q) {
         LocalDateTime cutoff = LocalDateTime.now().minusMonths(months);
-        return orderRepo.findByDraftAtAfterOrderByDraftAtDesc(cutoff).stream()
-                .map(this::toPaymentDto).toList();
+        return PagedResponse.of(orderRepo.search(cutoff, sanitize(q), pageOf(page, size, Sort.by("draftAt").descending()))
+                .map(this::toPaymentDto));
     }
 
     @Transactional(readOnly = true)
-    public List<AdminUserDto> listUsers() {
-        return userRepo.findAllByDeletedAtIsNullOrderByCreatedAtAsc().stream()
-                .map(this::toUserDto).toList();
+    public PagedResponse<AdminUserDto> listUsers(int page, int size, String q) {
+        return PagedResponse.of(userRepo.searchActive(sanitize(q), pageOf(page, size, Sort.by("createdAt").ascending()))
+                .map(this::toUserDto));
+    }
+
+    private PageRequest pageOf(int page, int size, Sort sort) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        return PageRequest.of(safePage, safeSize, sort);
+    }
+
+    private String sanitize(String q) {
+        return q == null ? "" : q.trim();
     }
 
     /* ── Blacklist / soft-delete ──────────────────────────────────── */
@@ -236,8 +260,11 @@ public class AdminDashboardService {
 
     /* ── Partner applications ─────────────────────────────────────── */
     @Transactional(readOnly = true)
-    public List<AdminPartnerDto> listPartners() {
-        return partnerRepo.listSummaries();
+    public PagedResponse<AdminPartnerDto> listPartners(int page, int size, String q) {
+        // Unsorted — PartnerApplicationRepository.search already bakes "order by
+        // createdAt desc" into its JPQL, since it's a DTO constructor-expression
+        // query rather than an entity one.
+        return PagedResponse.of(partnerRepo.search(sanitize(q), pageOf(page, size, Sort.unsorted())));
     }
 
     /**
@@ -283,10 +310,10 @@ public class AdminDashboardService {
     }
 
     @Transactional(readOnly = true)
-    public List<AdminUserDto> listLogins(int months) {
+    public PagedResponse<AdminUserDto> listLogins(int months, int page, int size, String q) {
         LocalDateTime cutoff = LocalDateTime.now().minusMonths(months);
-        return userRepo.findByLastLoginAtAfterOrderByLastLoginAtDesc(cutoff).stream()
-                .map(this::toUserDto).toList();
+        return PagedResponse.of(userRepo.searchLogins(cutoff, sanitize(q), pageOf(page, size, Sort.by("lastLoginAt").descending()))
+                .map(this::toUserDto));
     }
 
     private AdminTestSessionDto toTestDto(AssessmentSession session) {
