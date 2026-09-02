@@ -6,6 +6,7 @@ import com.example.heail_backend.repository.*;
 import com.example.heail_backend.util.OptionOrder;
 import com.example.heail_backend.util.SessionTimer;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +31,7 @@ import java.util.stream.Collectors;
  * no org-bulk purchase flow in this pass.
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class HrAssessmentService {
 
@@ -146,8 +148,19 @@ public class HrAssessmentService {
     @Transactional
     public List<HrSessionResumeResponse> listInProgress(String email) {
         User user = requireUser(email);
-        return sessionRepo.findByUserAndStatusAndProductCodeStartingWith(user, SessionStatus.IN_PROGRESS, PRODUCT_PREFIX)
-                .stream().map(session -> resume(session.getId(), email)).toList();
+        List<HrSessionResumeResponse> out = new ArrayList<>();
+        for (AssessmentSession session : sessionRepo.findByUserAndStatusAndProductCodeStartingWith(
+                user, SessionStatus.IN_PROGRESS, PRODUCT_PREFIX)) {
+            try {
+                out.add(resume(session.getId(), email));
+            } catch (RuntimeException e) {
+                // One unresumable session (e.g. its question_ids reference questions
+                // no longer in the bank) must not 500 the whole /dashboard aggregate.
+                log.warn("Skipping unresumable in-progress HR session {} for {}: {}",
+                        session.getId(), email, e.toString());
+            }
+        }
+        return out;
     }
 
     /* ── Autosave one answer (upsert) ─────────────────────────────── */
@@ -334,8 +347,16 @@ public class HrAssessmentService {
 
     private List<HrQuestionDto> toOrderedQuestionDtos(List<String> ids, UUID sessionId) {
         Map<String, HrQuestionBank> byId = hrQuestionBankRepo.findByQuestionIdIn(ids).stream()
-                .collect(Collectors.toMap(HrQuestionBank::getQuestionId, q -> q));
-        return ids.stream().map(id -> toQuestionDto(byId.get(id), sessionId)).toList();
+                .collect(Collectors.toMap(HrQuestionBank::getQuestionId, q -> q, (a, b) -> a));
+        // Skip ids no longer in the bank rather than NPE — a session built against an
+        // older question bank can still be listed (and partially resumed) instead of
+        // taking down every caller of resume().
+        List<String> missing = ids.stream().filter(id -> !byId.containsKey(id)).toList();
+        if (!missing.isEmpty())
+            log.warn("Session {} references {} question id(s) not in hr_question_bank: {}",
+                    sessionId, missing.size(), missing);
+        return ids.stream().map(byId::get).filter(Objects::nonNull)
+                .map(q -> toQuestionDto(q, sessionId)).toList();
     }
 
     private HrQuestionDto toQuestionDto(HrQuestionBank q, UUID sessionId) {
