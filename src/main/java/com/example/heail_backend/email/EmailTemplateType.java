@@ -281,7 +281,7 @@ public enum EmailTemplateType {
             aggregate only. Please answer honestly — the outcome depends on it.
 
             A separate email has just been sent to this address with a link to
-            set your password. Once that's done, sign in here: {frontendBaseUrl}/login
+            set your password. Once that's done, sign in here: {frontendBaseUrl}/login?force=1&returnUrl=/pulse
 
             — Team HEAIL
             contact@heail.in
@@ -296,7 +296,7 @@ public enum EmailTemplateType {
             This is a reminder that {organisationName} has enrolled you in the HEAIL 4-Pulse
             Diagnostic and you have not yet started. It takes about four short
             sittings of around 30 minutes each. Please sign in and begin as soon
-            as possible: {frontendBaseUrl}/login
+            as possible: {frontendBaseUrl}/login?force=1&returnUrl=/pulse
 
             — Team HEAIL
             contact@heail.in
@@ -312,7 +312,7 @@ public enum EmailTemplateType {
             Pulses are still pending:
 
             {pendingList}
-            Please sign in and complete them as soon as possible: {frontendBaseUrl}/login
+            Please sign in and complete them as soon as possible: {frontendBaseUrl}/login?force=1&returnUrl=/pulse
 
             — Team HEAIL
             contact@heail.in
