@@ -72,6 +72,8 @@ public class DashboardService {
         List<Order> leaderOrders = orderRepo.findByUserAndProductCodeOrderByDraftAtDesc(user, LEADER_CLASSIC_PRODUCT);
         res.setLeaderUnpaidOrder(!leaderOrders.isEmpty() && leaderOrders.get(0).getStatus() != OrderStatus.PAID
                 && leaderOrders.get(0).getStatus() != OrderStatus.ABANDONED && leaderOrders.get(0).getStatus() != OrderStatus.FAILED);
+        // Paid (or 100%-coupon) but not yet started — otherwise the purchase is invisible here.
+        res.setLeaderReadyToStart(assessmentService.hasEntitlement(email));
 
         // Respondent activity — every org's pulse round this person was invited into,
         // whether as an employee of their own org or added by a different one.

@@ -29,6 +29,11 @@ public class DashboardResponse {
      *  "complete payment" prompt even before any assessment session exists. */
     boolean leaderUnpaidOrder;
 
+    /** True if the caller holds an unused LEADER_CLASSIC entitlement — i.e. they've
+     *  paid (or redeemed a 100% coupon) but not yet started the assessment. Without
+     *  this a paid-but-unstarted Leader purchase is invisible on the dashboard. */
+    boolean leaderReadyToStart;
+
     /** Every organisation's pulse round the caller has been invited into as a
      *  respondent (their own org and/or any other org that added them by email). */
     List<RespondentMembershipDto> respondentMemberships;
