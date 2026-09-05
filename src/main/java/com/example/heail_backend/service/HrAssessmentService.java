@@ -37,6 +37,10 @@ public class HrAssessmentService {
 
     private static final String PRODUCT_PREFIX = "HR_A";
     private static final int HR_OPTION_COUNT = 5;
+    /** The best-scoring option on every question is worth 5 (see HrQuestionBank) —
+     *  used as the per-question denominator when converting a raw score sum into a
+     *  percentage of what was achievable. */
+    private static final int MAX_SCORE_PER_QUESTION = 5;
 
     private final EntitlementRepository entitlementRepo;
     private final AssessmentSessionRepository sessionRepo;
@@ -230,32 +234,42 @@ public class HrAssessmentService {
         Map<Integer, String> skillCategoryNames = hrSkillCategoryRepo.findAllById(skillCategoryIds).stream()
                 .collect(Collectors.toMap(HrSkillCategory::getId, HrSkillCategory::getName));
 
-        Map<String, Integer> competencyScores = new LinkedHashMap<>();
-        Map<String, Integer> skillCategoryScores = new LinkedHashMap<>();
+        // Raw sums + how many questions contributed to each, so every rollup below can be
+        // expressed as a percentage of *its own* max (competencies/skill-categories don't
+        // all draw the same number of questions, so a shared denominator would be unfair).
+        Map<String, Integer> competencyScoreSum = new LinkedHashMap<>();
+        Map<String, Integer> competencyCount = new LinkedHashMap<>();
+        Map<String, Integer> skillCategoryScoreSum = new LinkedHashMap<>();
+        Map<String, Integer> skillCategoryCount = new LinkedHashMap<>();
 
-        int overall = 0;
+        int overallSum = 0;
         Answer strongestAnswer = null;
         Answer weakestAnswer = null;
 
         for (Answer a : answers) {
             HrQuestionBank q = questionsById.get(a.getQuestionId());
             String competencyCode = q.getCompetencyCode();
-            competencyScores.merge(competencyCode, (int) a.getScore(), Integer::sum);
+            competencyScoreSum.merge(competencyCode, (int) a.getScore(), Integer::sum);
+            competencyCount.merge(competencyCode, 1, Integer::sum);
 
             String skillCategoryName = skillCategoryNames.get(competenciesByCode.get(competencyCode).getSkillCategoryId());
-            skillCategoryScores.merge(skillCategoryName, (int) a.getScore(), Integer::sum);
+            skillCategoryScoreSum.merge(skillCategoryName, (int) a.getScore(), Integer::sum);
+            skillCategoryCount.merge(skillCategoryName, 1, Integer::sum);
 
-            overall += a.getScore();
+            overallSum += a.getScore();
             if (strongestAnswer == null || a.getScore() > strongestAnswer.getScore()) strongestAnswer = a;
             if (weakestAnswer == null || a.getScore() < weakestAnswer.getScore()) weakestAnswer = a;
         }
+
+        Map<String, Integer> competencyScores = toPercentages(competencyScoreSum, competencyCount);
+        Map<String, Integer> skillCategoryScores = toPercentages(skillCategoryScoreSum, skillCategoryCount);
 
         HrResult result = new HrResult();
         result.setSession(session);
         result.setUser(session.getUser());
         result.setAssessment(requireAssessment(assessmentIdFromProductCode(session.getProductCode())));
         result.setAttemptNumber(session.getAttemptNumber());
-        result.setOverallScore((short) overall);
+        result.setOverallScore((short) percentage(overallSum, answers.size()));
         result.setCompetencyScores(competencyScores);
         result.setSkillCategoryScores(skillCategoryScores);
         if (strongestAnswer != null) result.setStrongestCompetency(questionsById.get(strongestAnswer.getQuestionId()).getCompetencyCode());
@@ -330,6 +344,21 @@ public class HrAssessmentService {
     }
 
     /* ── Private helpers ───────────────────────────────────────── */
+
+    /** Rounds a raw score sum to a 0-100 percentage of what was achievable
+     *  ({@code questionCount * MAX_SCORE_PER_QUESTION}). Zero questions -> 0, not NaN. */
+    private static int percentage(int scoreSum, int questionCount) {
+        return questionCount == 0 ? 0 : Math.round(scoreSum * 100f / (questionCount * MAX_SCORE_PER_QUESTION));
+    }
+
+    private static Map<String, Integer> toPercentages(Map<String, Integer> scoreSums, Map<String, Integer> counts) {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> e : scoreSums.entrySet()) {
+            out.put(e.getKey(), percentage(e.getValue(), counts.get(e.getKey())));
+        }
+        return out;
+    }
+
     private <T> void shuffle(List<T> list) {
         for (int i = list.size() - 1; i > 0; i--) {
             int j = secureRandom.nextInt(i + 1);
