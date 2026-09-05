@@ -429,6 +429,14 @@ public class HrAssessmentService {
         };
     }
 
+    /**
+     * The test-taker's view of one of their own HR attempts — deliberately
+     * SCORE-FREE. HR is a buyer-arranged product: the person who took the test
+     * sees only that it was completed (assessment, attempt, date); the scored
+     * breakdown is visible solely to the buyer, via
+     * {@link HrOrderService#listMyCandidates} / the "Candidates You've Registered"
+     * dashboard card. Do not add score fields here.
+     */
     private HrResultResponse toResponse(HrResult r) {
         HrResultResponse dto = new HrResultResponse();
         dto.setId(r.getId());
@@ -440,17 +448,6 @@ public class HrAssessmentService {
         dto.setAssessmentName(assessment.getName());
 
         dto.setAttemptNumber(r.getAttemptNumber());
-        dto.setOverallScore(r.getOverallScore());
-        dto.setCompetencyScores(r.getCompetencyScores());
-        dto.setSkillCategoryScores(r.getSkillCategoryScores());
-        dto.setStrongestCompetency(r.getStrongestCompetency());
-        dto.setWeakestCompetency(r.getWeakestCompetency());
-
-        if (r.getStrongestCompetency() != null)
-            hrCompetencyRepo.findById(r.getStrongestCompetency()).ifPresent(c -> dto.setStrongestCompetencyName(c.getName()));
-        if (r.getWeakestCompetency() != null)
-            hrCompetencyRepo.findById(r.getWeakestCompetency()).ifPresent(c -> dto.setWeakestCompetencyName(c.getName()));
-
         dto.setCreatedAt(r.getCreatedAt());
         return dto;
     }

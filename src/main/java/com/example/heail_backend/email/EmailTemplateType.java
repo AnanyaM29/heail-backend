@@ -165,13 +165,15 @@ public enum EmailTemplateType {
             Receipt reference: {receiptRef}
 
             Your Classic Assessment (50 questions, about 30 minutes, one sitting) is
-            being finalised. You will be notified the moment it is ready to begin —
-            please check your email and complete the test as soon as possible after that.
+            being finalised. You will be notified the moment it is ready to begin.
+
+            When it's ready, sign in here to start:
+            {frontendBaseUrl}/take-test/leader
 
             — Team HEAIL
             contact@heail.in
             """,
-            List.of("name", "amount", "invoiceNumber", "receiptRef")),
+            List.of("name", "amount", "invoiceNumber", "receiptRef", "frontendBaseUrl")),
 
     LEADER_RESULTS_READY("leader_results_ready", "Leader — results ready",
             "Your results are on your dashboard",
@@ -228,13 +230,15 @@ public enum EmailTemplateType {
             required, and no invoice was generated.
 
             Your Classic Assessment (50 questions, about 30 minutes, one sitting) is
-            being finalised. You will be notified the moment it is ready to begin —
-            please check your email and complete the test as soon as possible after that.
+            being finalised. You will be notified the moment it is ready to begin.
+
+            When it's ready, sign in here to start:
+            {frontendBaseUrl}/take-test/leader
 
             — Team HEAIL
             contact@heail.in
             """,
-            List.of("name")),
+            List.of("name", "frontendBaseUrl")),
 
     ORG_FREE_ACCESS("org_free_access", "Org — free access (100% coupon)",
             "Your HEAIL Diagnostic is live — no charge",
@@ -281,7 +285,7 @@ public enum EmailTemplateType {
             aggregate only. Please answer honestly — the outcome depends on it.
 
             A separate email has just been sent to this address with a link to
-            set your password. Once that's done, sign in here: {frontendBaseUrl}/login?force=1&returnUrl=/pulse
+            set your password. Once that's done, sign in here: {frontendBaseUrl}/take-test/pulse
 
             — Team HEAIL
             contact@heail.in
@@ -296,7 +300,7 @@ public enum EmailTemplateType {
             This is a reminder that {organisationName} has enrolled you in the HEAIL 4-Pulse
             Diagnostic and you have not yet started. It takes about four short
             sittings of around 30 minutes each. Please sign in and begin as soon
-            as possible: {frontendBaseUrl}/login?force=1&returnUrl=/pulse
+            as possible: {frontendBaseUrl}/take-test/pulse
 
             — Team HEAIL
             contact@heail.in
@@ -312,7 +316,7 @@ public enum EmailTemplateType {
             Pulses are still pending:
 
             {pendingList}
-            Please sign in and complete them as soon as possible: {frontendBaseUrl}/login?force=1&returnUrl=/pulse
+            Please sign in and complete them as soon as possible: {frontendBaseUrl}/take-test/pulse
 
             — Team HEAIL
             contact@heail.in
