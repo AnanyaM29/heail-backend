@@ -199,7 +199,8 @@ public class HrAssessmentService {
         res.setQuestionId(req.getQuestionId());
         res.setSelectedOption(req.getSelectedOption());
         res.setAnsweredCount(answeredCount);
-        res.setTotalQuestions(session.getQuestionIds().size());
+        // Count against what the player actually renders — see renderableQuestionIds.
+        res.setTotalQuestions(renderableQuestionIds(session.getQuestionIds()).size());
         return res;
     }
 
@@ -211,7 +212,10 @@ public class HrAssessmentService {
             throw new IllegalStateException("This assessment has already been submitted");
 
         List<Answer> answers = answerRepo.findBySessionId(sessionId);
-        int total = session.getQuestionIds().size();
+        // Measure completion against the questions the player could actually answer, not
+        // the raw session list — a stale id the bank no longer has is never rendered, so
+        // it must not block submission (that would strand the respondent with no fix).
+        int total = renderableQuestionIds(session.getQuestionIds()).size();
         // A forced submit (time ran out client-side) is only honoured once the deadline has
         // genuinely passed server-side. Scoring below only ever sums over `answers`, so an
         // incomplete forced submit naturally scores just the questions actually answered.
@@ -372,6 +376,19 @@ public class HrAssessmentService {
 
     private static short assessmentIdFromProductCode(String productCode) {
         return Short.parseShort(productCode.substring(PRODUCT_PREFIX.length()));
+    }
+
+    /**
+     * The subset of a session's question ids that still resolve to a bank row — i.e.
+     * exactly what {@link #toOrderedQuestionDtos} renders to the player. Ids the
+     * session references but the bank no longer has (e.g. after a question-bank
+     * reload) are not part of the assessment as far as the respondent can tell,
+     * so completion / submission must be measured against this, not the raw list.
+     */
+    private List<String> renderableQuestionIds(List<String> sessionQuestionIds) {
+        Set<String> present = hrQuestionBankRepo.findByQuestionIdIn(sessionQuestionIds).stream()
+                .map(HrQuestionBank::getQuestionId).collect(Collectors.toSet());
+        return sessionQuestionIds.stream().filter(present::contains).toList();
     }
 
     private List<HrQuestionDto> toOrderedQuestionDtos(List<String> ids, UUID sessionId) {
