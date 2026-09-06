@@ -39,6 +39,22 @@ public class AssessmentService {
     public StartAssessmentResponse start(String email) {
         User user = requireUser(email);
 
+        // Never start a second sitting on top of a live one — that orphans the first
+        // (its entitlement already spent) and it lingers forever as "Resume". Hand back
+        // the in-progress session instead.
+        AssessmentSession existing = sessionRepo
+                .findFirstByUserAndProductCodeAndStatusOrderByStartedAtDesc(
+                        user, LEADER_CLASSIC_PRODUCT, SessionStatus.IN_PROGRESS)
+                .orElse(null);
+        if (existing != null) {
+            StartAssessmentResponse res = new StartAssessmentResponse();
+            res.setSessionId(existing.getId());
+            res.setAttemptNumber(existing.getAttemptNumber());
+            res.setQuestions(toOrderedQuestionDtos(existing.getQuestionIds(), existing.getId()));
+            res.setDeadlineAt(existing.getDeadlineAt());
+            return res;
+        }
+
         Entitlement entitlement = entitlementRepo
                 .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, LEADER_CLASSIC_PRODUCT)
                 .orElseThrow(() -> new AccessDeniedException("No unused entitlement for The Gita Leader assessment"));
@@ -156,7 +172,7 @@ public class AssessmentService {
         res.setQuestionId(req.getQuestionId());
         res.setSelectedOption(req.getSelectedOption());
         res.setAnsweredCount(answeredCount);
-        res.setTotalQuestions(session.getQuestionIds().size());
+        res.setTotalQuestions((int) session.getQuestionIds().stream().distinct().count());
         return res;
     }
 
@@ -168,22 +184,25 @@ public class AssessmentService {
             throw new IllegalStateException("This assessment has already been submitted");
 
         List<Answer> answers = answerRepo.findBySessionId(sessionId);
-        int total = session.getQuestionIds().size();
-        // A forced submit (time ran out client-side) is only honoured once the deadline has
-        // genuinely passed server-side — otherwise a client could submit early with `forced=true`
-        // to lock in a partial score. Scoring below already only ever sums over `answers`, so an
-        // incomplete forced submit naturally scores just the questions actually answered.
+        // Distinct ids: answers are one-per-question (upsert), so if the stored id list
+        // ever carries a repeat, comparing against the raw size would make the count
+        // unreachable and permanently reject the submit.
+        int total = (int) session.getQuestionIds().stream().distinct().count();
+        // Once the server's own clock says the deadline has passed, the sitting is over:
+        // answer() is already refusing new answers, so blocking the submit here would just
+        // strand the taker. The bypass depends only on timeExpired (server-authoritative,
+        // a client cannot fake it) — `forced` is irrelevant to it.
         boolean timeExpired = session.getDeadlineAt() != null && LocalDateTime.now().isAfter(session.getDeadlineAt());
-        if (answers.size() < total && !(forced && timeExpired))
+        if (answers.size() < total && !timeExpired)
             throw new IllegalArgumentException(
                     "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
         // Ran out of time with questions still unanswered — the result stands, marked as a
         // timeout; the percentage reported is marks achieved out of the full paper.
-        boolean timedOut = forced && timeExpired && answers.size() < total;
+        boolean timedOut = timeExpired && answers.size() < total;
 
         Map<String, LeaderQuestionBank> questionsById = questionBankRepo
                 .findByQuestionIdIn(answers.stream().map(Answer::getQuestionId).toList()).stream()
-                .collect(Collectors.toMap(LeaderQuestionBank::getQuestionId, q -> q));
+                .collect(Collectors.toMap(LeaderQuestionBank::getQuestionId, q -> q, (a, b) -> a));
 
         Map<String, Integer> domainScores = new LinkedHashMap<>();
         for (String d : List.of("I", "II", "III", "IV", "V")) domainScores.put(d, 0);
@@ -194,7 +213,10 @@ public class AssessmentService {
 
         for (Answer a : answers) {
             LeaderQuestionBank q = questionsById.get(a.getQuestionId());
-            domainScores.merge(q.getDomain(), (int) a.getScore(), Integer::sum);
+            // An answer whose question is no longer in the bank (bank reloaded mid-flight)
+            // simply doesn't contribute — it must not NPE the whole submit and strand the taker.
+            if (q == null) continue;
+            if (q.getDomain() != null) domainScores.merge(q.getDomain(), (int) a.getScore(), Integer::sum);
             overall += a.getScore();
             if (strongestAnswer == null || a.getScore() > strongestAnswer.getScore()) strongestAnswer = a;
             if (weakestAnswer == null || a.getScore() < weakestAnswer.getScore()) weakestAnswer = a;

@@ -201,7 +201,7 @@ public class PulseAssessmentService {
         res.setQuestionId(req.getQuestionId());
         res.setSelectedOption(req.getSelectedOption());
         res.setAnsweredCount(answeredCount);
-        res.setTotalQuestions(session.getQuestionIds().size());
+        res.setTotalQuestions((int) session.getQuestionIds().stream().distinct().count());
         return res;
     }
 
@@ -212,19 +212,22 @@ public class PulseAssessmentService {
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This Pulse has already been submitted");
 
-        int total = session.getQuestionIds().size();
+        // distinct: answers are one-per-question, so a repeated id in the stored list
+        // would otherwise inflate the target and permanently block submission.
+        int total = (int) session.getQuestionIds().stream().distinct().count();
         List<Answer> answers = answerRepo.findBySessionId(sessionId);
-        // A forced submit (time ran out client-side) is only honoured once the deadline has
-        // genuinely passed server-side. scoreSections() below only ever scores over `answers`,
-        // so an incomplete forced submit naturally scores just the questions actually answered.
+        // Once the server's own clock says the deadline has passed, the sitting is over:
+        // answer() is already refusing new answers, so blocking the submit here would just
+        // strand the respondent. The bypass depends only on timeExpired (server-authoritative,
+        // a client cannot fake it) — `forced` is irrelevant to it.
         boolean timeExpired = session.getDeadlineAt() != null && LocalDateTime.now().isAfter(session.getDeadlineAt());
-        if (answers.size() < total && !(forced && timeExpired))
+        if (answers.size() < total && !timeExpired)
             throw new IllegalArgumentException(
                     "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
 
         session.setStatus(SessionStatus.COMPLETED);
         session.setCompletedAt(LocalDateTime.now());
-        session.setTimedOut(forced && timeExpired && answers.size() < total);
+        session.setTimedOut(timeExpired && answers.size() < total);
         AssessmentSession saved = sessionRepo.save(session);
 
         scoreSections(saved, answers);

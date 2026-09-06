@@ -230,17 +230,18 @@ public class HrAssessmentService {
         // the raw session list — a stale id the bank no longer has is never rendered, so
         // it must not block submission (that would strand the respondent with no fix).
         int total = renderableQuestionIds(session.getQuestionIds()).size();
-        // A forced submit (time ran out client-side) is only honoured once the deadline has
-        // genuinely passed server-side. Scoring below only ever sums over `answers`, so an
-        // incomplete forced submit naturally scores just the questions actually answered.
+        // Once the server's own clock says the deadline has passed, the sitting is over:
+        // answer() is already refusing new answers, so blocking the submit here would just
+        // strand the respondent. The bypass depends only on timeExpired (server-authoritative,
+        // a client cannot fake it) — `forced` is irrelevant to it.
         boolean timeExpired = session.getDeadlineAt() != null && LocalDateTime.now().isAfter(session.getDeadlineAt());
-        if (answers.size() < total && !(forced && timeExpired))
+        if (answers.size() < total && !timeExpired)
             throw new IllegalArgumentException(
                     "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
         // Ran out of time with questions still unanswered — the result stands, marked as a
         // timeout, and the overall percentage is "marks achieved so far" out of the full
         // paper (every unanswered question counts as zero).
-        boolean timedOut = forced && timeExpired && answers.size() < total;
+        boolean timedOut = timeExpired && answers.size() < total;
 
         Map<String, HrQuestionBank> questionsById = hrQuestionBankRepo
                 .findByQuestionIdIn(answers.stream().map(Answer::getQuestionId).toList()).stream()
@@ -412,7 +413,9 @@ public class HrAssessmentService {
     private List<String> renderableQuestionIds(List<String> sessionQuestionIds) {
         Set<String> present = hrQuestionBankRepo.findByQuestionIdIn(sessionQuestionIds).stream()
                 .map(HrQuestionBank::getQuestionId).collect(Collectors.toSet());
-        return sessionQuestionIds.stream().filter(present::contains).toList();
+        // distinct: answers are one-per-question, so a repeated id in the stored list
+        // would otherwise inflate the target and permanently block submission.
+        return sessionQuestionIds.stream().filter(present::contains).distinct().toList();
     }
 
     private List<HrQuestionDto> toOrderedQuestionDtos(List<String> ids, UUID sessionId) {
