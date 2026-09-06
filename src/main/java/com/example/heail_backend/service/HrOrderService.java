@@ -234,10 +234,6 @@ public class HrOrderService {
                 .filter(c -> c.getOrder().getStatus() == OrderStatus.PAID)
                 .map(c -> {
                     HrCandidateDto dto = toCandidateDto(c);
-                    // Retake is a self-service paid action (a fresh mini-order, same
-                    // pillars, same person). Reallocation to a different person is not
-                    // offered — the assessment stays with whoever the buyer registered.
-                    dto.setCanRequestRetake(c.getUser() != null && !"PENDING".equals(c.getStatus()));
                     if (c.getUser() != null) {
                         // A candidate's throwaway account is matched by email and may be
                         // reused across orders/retakes, and it can carry stale rows from
@@ -262,68 +258,8 @@ public class HrOrderService {
                 }).toList();
     }
 
-    /* ── Reallocation / retake — both are self-service: buy a fresh
-       single-candidate order for the same pillars, and pay through the
-       existing HrPaymentComponent/markPaidFromGateway pipeline unchanged.
-       No admin approval — see class doc for why the earlier request/approve
-       design was retired. ─────────────────────────────────────────────── */
-
-    /** Retake: same candidate, same details, a brand new paid slot — their
-     *  existing account is reused (matched by email) at fulfilment time, so
-     *  this just grants a fresh entitlement + a live token even if their old
-     *  one expired. Reallocation to a different person is not supported — an
-     *  assessment stays tied to the one person the buyer registered. */
-    @Transactional
-    public OrderResponse createRetakeOrder(UUID candidateId, String email) {
-        HrCandidate original = requireOwnedCandidate(candidateId, email);
-        if (original.getUser() == null)
-            throw new IllegalArgumentException("This candidate hasn't been sent an invitation yet");
-
-        Order newOrder = createFollowOnOrder(original.getOrder(), original.getName(), original.getDob(),
-                original.getEmail(), original.getMobile());
-        return toResponse(newOrder);
-    }
-
-    /** A new DRAFT order, same pillars as the original, one candidate row,
-     *  priced and ready to route straight into HrPaymentComponent (skips
-     *  candidate-entry — there's only ever one row). */
-    private Order createFollowOnOrder(Order originalOrder, String name, LocalDate dob, String email, String mobile) {
-        List<Short> selectedIds = selectedPillarIds(originalOrder);
-        if (selectedIds.isEmpty())
-            throw new IllegalStateException("The original order has no pillars on record");
-
-        Order order = new Order();
-        order.setUser(originalOrder.getUser());
-        order.setProductCode(HR_SUITE_PRODUCT);
-        order.setCurrency(INR_CURRENCY);
-        order.setStatus(OrderStatus.DRAFT);
-
-        Map<String, String> metadata = new HashMap<>();
-        metadata.put(SELECTED_IDS_KEY, serializeIds(selectedIds));
-        order.setMetadata(metadata);
-        order = orderRepo.save(order);
-
-        HrCandidate candidate = new HrCandidate();
-        candidate.setOrder(order);
-        candidate.setName(name);
-        candidate.setDob(dob);
-        candidate.setEmail(email);
-        candidate.setMobile(mobile);
-        candidate.setAssessmentStartDate(LocalDate.now());
-        candidate.setStatus("PENDING");
-        hrCandidateRepo.save(candidate);
-
-        repriceForCandidates(order, selectedIds.size(), 1);
-        return orderRepo.save(order);
-    }
-
-    private HrCandidate requireOwnedCandidate(UUID candidateId, String email) {
-        HrCandidate candidate = hrCandidateRepo.findById(candidateId)
-                .orElseThrow(() -> new IllegalArgumentException("Candidate not found"));
-        if (!candidate.getOrder().getUser().getEmail().equalsIgnoreCase(email))
-            throw new IllegalArgumentException("Candidate not found");
-        return candidate;
-    }
+    /* An HR assessment is taken once. There is no retake / reallocation flow —
+       a repeat sitting is a brand new order through the normal buy-HR path. */
 
     /* ── Accept the Terms of Agreement for an order ───────────────── */
     @Transactional
@@ -517,8 +453,8 @@ public class HrOrderService {
         return (short) Math.max(0, Math.min(100, score));
     }
 
-    /** Pillar IDs currently selected on an order — used when building a
-     *  follow-on (retake/reallocation) order for the same pillars. */
+    /** Pillar IDs selected on an order — used to scope a candidate's results to
+     *  the pillars that order actually bought. */
     private List<Short> selectedPillarIds(Order order) {
         return deserializeIds(order.getMetadata() != null ? order.getMetadata().get(SELECTED_IDS_KEY) : null);
     }
