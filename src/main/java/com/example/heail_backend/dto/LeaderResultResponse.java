@@ -12,6 +12,10 @@ public class LeaderResultResponse {
     UUID sessionId;
     int attemptNumber;
     int overallScore;
+    /** True when the attempt was closed out by the 30-minute deadline rather than
+     *  finished. When set, the taker sees only the status "Assessment Timed Out" —
+     *  no score, no band, no breakdown. */
+    boolean timedOut;
     String band;
     Map<String, Integer> domainScores;
     String strongestPrinciple;

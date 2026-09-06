@@ -122,6 +122,7 @@ public class EmailService {
             Map.entry("message", "Hello, I'd like to know more."),
             Map.entry("completed", "8"),
             Map.entry("total", "12"),
+            Map.entry("loginBlock", "Your HEAIL sign-in details:\n    Email:    jane@acme.com\n    Password: Xy7kPq3mRt\nYou can change this password once you're signed in."),
             Map.entry("pendingList", "  • Talent Pulse\n  • Growth Pulse\n"),
             Map.entry("list", "  • John Smith\n  • Priya Patel\n"),
             Map.entry("assessmentList", "  • HR Competency Assessment\n"),
@@ -246,9 +247,22 @@ public class EmailService {
     /* ── Pulse round: employee + org-admin lifecycle ───────────── */
 
     @Async
-    public void sendEmployeeInvitation(String toEmail, String employeeName, String organisationName) {
-        dispatch(EmailTemplateType.EMPLOYEE_INVITATION, toEmail,
-                Map.of("employeeName", employeeName, "organisationName", organisationName));
+    /** @param issuedPassword the generated password for a brand-new respondent
+     *  account, or null when the account already existed. Included in the body
+     *  either way — this email goes only to the respondent, never CC'd. */
+    public void sendEmployeeInvitation(String toEmail, String employeeName, String organisationName,
+                                       String issuedPassword) {
+        String loginBlock = issuedPassword != null
+                ? "Your HEAIL sign-in details:\n"
+                  + "    Email:    " + toEmail + "\n"
+                  + "    Password: " + issuedPassword + "\n"
+                  + "You can change this password once you're signed in."
+                : "Sign in with your existing HEAIL account for this email address — "
+                  + "use \"Forgot password\" on the sign-in page if you need to reset it.";
+        dispatch(EmailTemplateType.EMPLOYEE_INVITATION, toEmail, Map.of(
+                "employeeName", employeeName,
+                "organisationName", organisationName,
+                "loginBlock", loginBlock));
     }
 
     @Async
@@ -306,13 +320,13 @@ public class EmailService {
 
     /* ── HR candidate flow — tokenized link, no HEAIL account ──── */
 
-    /** @param buyerEmailCc CC'd on the candidate's invitation so the HR buyer who
-     *  registered them has visibility that it actually went out. */
+    /** Goes only to the candidate who takes the assessment — the buyer who
+     *  registered them is not CC'd. */
     @Async
     public void sendCandidateInvitation(String toEmail, String candidateName, List<String> assessmentNames,
-                                        String accessToken, LocalDateTime expiresAt, String buyerEmailCc) {
+                                        String accessToken, LocalDateTime expiresAt) {
         String assessmentList = String.join("\n", assessmentNames.stream().map(n -> "  • " + n).toList());
-        send(EmailTemplateType.CANDIDATE_INVITATION, toEmail, buyerEmailCc, null,
+        send(EmailTemplateType.CANDIDATE_INVITATION, toEmail, null, null,
                 Map.of("candidateName", candidateName, "assessmentList", assessmentList,
                         "candidateLink", candidateLink(accessToken),
                         "expiresAt", expiresAt.toLocalDate().toString()),

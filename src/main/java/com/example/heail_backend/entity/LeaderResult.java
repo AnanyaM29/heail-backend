@@ -48,6 +48,11 @@ public class LeaderResult {
     @Column(name = "weakest_principle", length = 3)
     String weakestPrinciple;
 
+    /** True when this attempt was closed by the 30-minute deadline with questions
+     *  still unanswered. */
+    @Column(name = "timed_out", nullable = false, columnDefinition = "boolean default false")
+    boolean timedOut;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     LocalDateTime createdAt;
 

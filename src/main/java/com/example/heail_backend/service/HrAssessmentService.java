@@ -82,6 +82,14 @@ public class HrAssessmentService {
         HrAssessment assessment = requireAssessment(assessmentId);
         String productCode = productCodeFor(assessmentId);
 
+        // Accessible only once — a completed attempt can't be retaken (the entitlement
+        // is also consumed on start below, so this is belt-and-braces for the case of
+        // a stray extra entitlement on the account).
+        boolean alreadyCompleted = sessionRepo.findByUserAndProductCodeOrderByAttemptNumberDesc(user, productCode)
+                .stream().anyMatch(s -> s.getStatus() == SessionStatus.COMPLETED);
+        if (alreadyCompleted)
+            throw new AccessDeniedException(assessment.getName() + " has already been completed and cannot be retaken.");
+
         Entitlement entitlement = entitlementRepo
                 .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, productCode)
                 .orElseThrow(() -> new AccessDeniedException("No unused entitlement for " + assessment.getName()));
@@ -173,6 +181,12 @@ public class HrAssessmentService {
         AssessmentSession session = requireOwnedHrSession(sessionId, email);
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This assessment has already been submitted");
+        // Time's up: once the deadline has passed the assessment is over and no further
+        // answers are accepted. A small grace absorbs the last autosave racing the final
+        // forced submit the client fires when its own countdown hits zero.
+        if (session.getDeadlineAt() != null
+                && LocalDateTime.now().isAfter(session.getDeadlineAt().plusSeconds(20)))
+            throw new IllegalStateException("The time for this assessment has ended.");
         if (!session.getQuestionIds().contains(req.getQuestionId()))
             throw new IllegalArgumentException("Question is not part of this session");
 
@@ -223,6 +237,10 @@ public class HrAssessmentService {
         if (answers.size() < total && !(forced && timeExpired))
             throw new IllegalArgumentException(
                     "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
+        // Ran out of time with questions still unanswered — the result stands, marked as a
+        // timeout, and the overall percentage is "marks achieved so far" out of the full
+        // paper (every unanswered question counts as zero).
+        boolean timedOut = forced && timeExpired && answers.size() < total;
 
         Map<String, HrQuestionBank> questionsById = hrQuestionBankRepo
                 .findByQuestionIdIn(answers.stream().map(Answer::getQuestionId).toList()).stream()
@@ -273,7 +291,8 @@ public class HrAssessmentService {
         result.setUser(session.getUser());
         result.setAssessment(requireAssessment(assessmentIdFromProductCode(session.getProductCode())));
         result.setAttemptNumber(session.getAttemptNumber());
-        result.setOverallScore((short) percentage(overallSum, answers.size()));
+        result.setOverallScore((short) percentage(overallSum, timedOut ? total : answers.size()));
+        result.setTimedOut(timedOut);
         result.setCompetencyScores(competencyScores);
         result.setSkillCategoryScores(skillCategoryScores);
         if (strongestAnswer != null) result.setStrongestCompetency(questionsById.get(strongestAnswer.getQuestionId()).getCompetencyCode());
@@ -282,6 +301,7 @@ public class HrAssessmentService {
 
         session.setStatus(SessionStatus.COMPLETED);
         session.setCompletedAt(LocalDateTime.now());
+        session.setTimedOut(timedOut);
         sessionRepo.save(session);
 
         return toResponse(result);
@@ -448,6 +468,7 @@ public class HrAssessmentService {
         dto.setAssessmentName(assessment.getName());
 
         dto.setAttemptNumber(r.getAttemptNumber());
+        dto.setTimedOut(r.isTimedOut());
         dto.setCreatedAt(r.getCreatedAt());
         return dto;
     }

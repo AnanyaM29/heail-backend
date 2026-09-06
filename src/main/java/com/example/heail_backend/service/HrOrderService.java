@@ -50,7 +50,6 @@ public class HrOrderService {
     private static final String HR_PURCHASE_AGREEMENT = "HR_PURCHASE";
     private static final String INR_CURRENCY = "INR";
     private static final String SELECTED_IDS_KEY = "selectedAssessmentIds";
-    private static final String REALLOCATES_CANDIDATE_KEY = "reallocatesCandidateId";
     private static final String ENTITLEMENT_PREFIX = "HR_A";
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
     private static final SecureRandom TOKEN_RANDOM = new SecureRandom();
@@ -235,17 +234,14 @@ public class HrOrderService {
                 .filter(c -> c.getOrder().getStatus() == OrderStatus.PAID)
                 .map(c -> {
                     HrCandidateDto dto = toCandidateDto(c);
-                    // Both are now self-service paid actions (a fresh mini-order, same
-                    // pillars) rather than a free admin-vetted swap — see
-                    // createReallocationOrder/createRetakeOrder — so there's no time
-                    // window to check, just whether the action makes sense for this
-                    // candidate's current state.
-                    dto.setCanRequestReallocation("SENT".equals(c.getStatus()));
+                    // Retake is a self-service paid action (a fresh mini-order, same
+                    // pillars, same person). Reallocation to a different person is not
+                    // offered — the assessment stays with whoever the buyer registered.
                     dto.setCanRequestRetake(c.getUser() != null && !"PENDING".equals(c.getStatus()));
                     if (c.getUser() != null) {
                         dto.setResults(hrResultRepo.findByUserOrderByCreatedAtDesc(c.getUser()).stream()
                                 .map(r -> new HrCandidateResultSummary(r.getAssessment().getId(),
-                                        r.getAssessment().getName(), true, r.getOverallScore()))
+                                        r.getAssessment().getName(), true, r.getOverallScore(), r.isTimedOut()))
                                 .toList());
                     }
                     return dto;
@@ -261,7 +257,8 @@ public class HrOrderService {
     /** Retake: same candidate, same details, a brand new paid slot — their
      *  existing account is reused (matched by email) at fulfilment time, so
      *  this just grants a fresh entitlement + a live token even if their old
-     *  one expired. */
+     *  one expired. Reallocation to a different person is not supported — an
+     *  assessment stays tied to the one person the buyer registered. */
     @Transactional
     public OrderResponse createRetakeOrder(UUID candidateId, String email) {
         HrCandidate original = requireOwnedCandidate(candidateId, email);
@@ -269,34 +266,14 @@ public class HrOrderService {
             throw new IllegalArgumentException("This candidate hasn't been sent an invitation yet");
 
         Order newOrder = createFollowOnOrder(original.getOrder(), original.getName(), original.getDob(),
-                original.getEmail(), original.getMobile(), null);
+                original.getEmail(), original.getMobile());
         return toResponse(newOrder);
     }
 
-    /** Reallocation: a different person takes over an unstarted candidate's
-     *  slot. The old candidate's own link is invalidated once this new order
-     *  is actually paid (see markPaidFromGateway) — not now, so an abandoned
-     *  checkout doesn't kill a still-valid invitation. */
-    @Transactional
-    public OrderResponse createReallocationOrder(UUID candidateId, String email, ReallocationRequestDto newDetails) {
-        HrCandidate original = requireOwnedCandidate(candidateId, email);
-        if (!"SENT".equals(original.getStatus()))
-            throw new IllegalArgumentException("Only an unstarted candidate can be reallocated");
-        if (newDetails == null || newDetails.getNewName() == null || newDetails.getNewName().isBlank()
-                || newDetails.getNewEmail() == null || !EMAIL_PATTERN.matcher(newDetails.getNewEmail().trim()).matches()
-                || newDetails.getNewDob() == null)
-            throw new IllegalArgumentException("The replacement candidate's name, DOB and a valid email are required");
-
-        Order newOrder = createFollowOnOrder(original.getOrder(), newDetails.getNewName().trim(), newDetails.getNewDob(),
-                newDetails.getNewEmail().trim().toLowerCase(), newDetails.getNewMobile(), original);
-        return toResponse(newOrder);
-    }
-
-    /** Shared by both: a new DRAFT order, same pillars as the original, one
-     *  candidate row, priced and ready to route straight into
-     *  HrPaymentComponent (skips candidate-entry — there's only ever one row). */
-    private Order createFollowOnOrder(Order originalOrder, String name, LocalDate dob, String email, String mobile,
-                                       HrCandidate replaces) {
+    /** A new DRAFT order, same pillars as the original, one candidate row,
+     *  priced and ready to route straight into HrPaymentComponent (skips
+     *  candidate-entry — there's only ever one row). */
+    private Order createFollowOnOrder(Order originalOrder, String name, LocalDate dob, String email, String mobile) {
         List<Short> selectedIds = selectedPillarIds(originalOrder);
         if (selectedIds.isEmpty())
             throw new IllegalStateException("The original order has no pillars on record");
@@ -309,7 +286,6 @@ public class HrOrderService {
 
         Map<String, String> metadata = new HashMap<>();
         metadata.put(SELECTED_IDS_KEY, serializeIds(selectedIds));
-        if (replaces != null) metadata.put(REALLOCATES_CANDIDATE_KEY, replaces.getId().toString());
         order.setMetadata(metadata);
         order = orderRepo.save(order);
 
@@ -455,17 +431,6 @@ public class HrOrderService {
         List<HrCandidate> candidates = hrCandidateRepo.findByOrder(order);
         fulfilCandidates(order, candidates, selectedIds);
 
-        // A reallocation order: now that payment actually went through, retire
-        // the candidate this one replaces — not at order-creation time, so an
-        // abandoned checkout never kills a still-valid invitation.
-        String reallocatesId = metadata.get(REALLOCATES_CANDIDATE_KEY);
-        if (reallocatesId != null) {
-            hrCandidateRepo.findById(UUID.fromString(reallocatesId)).ifPresent(old -> {
-                old.setStatus("REALLOCATED");
-                hrCandidateRepo.save(old);
-            });
-        }
-
         if (freeViaCoupon) {
             emailService.sendHrFreeAccessGranted(order.getUser().getEmail(), order.getUser().getName(), candidates.size());
         } else {
@@ -527,7 +492,7 @@ public class HrOrderService {
         hrCandidateRepo.save(candidate);
 
         emailService.sendCandidateInvitation(candidate.getEmail(), candidate.getName(), pillarNames,
-                candidate.getAccessToken(), candidate.getTokenExpiresAt(), order.getUser().getEmail());
+                candidate.getAccessToken(), candidate.getTokenExpiresAt());
     }
 
     /** Pillar IDs currently selected on an order — used when building a

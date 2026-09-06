@@ -284,13 +284,15 @@ public enum EmailTemplateType {
             confidential and never shared with your organisation; results are
             aggregate only. Please answer honestly — the outcome depends on it.
 
-            A separate email has just been sent to this address with a link to
-            set your password. Once that's done, sign in here: {frontendBaseUrl}/take-test/pulse
+            {loginBlock}
+
+            Sign in and begin here:
+            {frontendBaseUrl}/take-test/pulse
 
             — Team HEAIL
             contact@heail.in
             """,
-            List.of("employeeName", "organisationName", "frontendBaseUrl")),
+            List.of("employeeName", "organisationName", "loginBlock", "frontendBaseUrl")),
 
     EMPLOYEE_REMINDER_NOT_STARTED("employee_reminder_not_started", "Employee reminder — not started",
             "Reminder — your HEAIL Diagnostic is waiting",

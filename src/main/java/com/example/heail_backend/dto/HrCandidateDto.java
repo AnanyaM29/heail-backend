@@ -18,7 +18,6 @@ public class HrCandidateDto {
     LocalDate assessmentStartDate;
     String status;
     LocalDateTime tokenExpiresAt;
-    boolean canRequestReallocation;
     boolean canRequestRetake;
     List<HrCandidateResultSummary> results;
 }

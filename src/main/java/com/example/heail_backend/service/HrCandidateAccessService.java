@@ -64,6 +64,17 @@ public class HrCandidateAccessService {
         if (candidate.getUser() == null)
             throw new IllegalStateException("This candidate's account isn't ready yet — try again shortly");
 
+        // Single-use once every assigned pillar has been started: the assessment is
+        // meant to be accessible only once, and only to the person the buyer
+        // registered. A resume of an in-progress pillar uses the JWT already held
+        // in that person's browser, not a fresh redeem of the link.
+        boolean somethingLeftToStart = entitlementRepo.findByUser(candidate.getUser()).stream()
+                .anyMatch(e -> e.getProductCode().startsWith("HR_A") && !e.isUsed());
+        if ("ACCESSED".equals(candidate.getStatus()) && !somethingLeftToStart)
+            throw new AccessDeniedException(
+                    "This assessment link has already been used. If you were interrupted mid-assessment, "
+                    + "contact whoever invited you to arrange a new link.");
+
         if (!"ACCESSED".equals(candidate.getStatus())) {
             candidate.setStatus("ACCESSED");
             hrCandidateRepo.save(candidate);

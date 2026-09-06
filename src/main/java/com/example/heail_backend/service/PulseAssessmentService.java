@@ -167,6 +167,12 @@ public class PulseAssessmentService {
         AssessmentSession session = requireOwnedSession(sessionId, email);
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This Pulse has already been submitted");
+        // Time's up: once the deadline has passed the assessment is over and no further
+        // answers are accepted. A small grace absorbs the last autosave racing the final
+        // forced submit the client fires when its own countdown hits zero.
+        if (session.getDeadlineAt() != null
+                && LocalDateTime.now().isAfter(session.getDeadlineAt().plusSeconds(20)))
+            throw new IllegalStateException("The time for this assessment has ended.");
         if (!session.getQuestionIds().contains(req.getQuestionId()))
             throw new IllegalArgumentException("Question is not part of this session");
 
@@ -218,6 +224,7 @@ public class PulseAssessmentService {
 
         session.setStatus(SessionStatus.COMPLETED);
         session.setCompletedAt(LocalDateTime.now());
+        session.setTimedOut(forced && timeExpired && answers.size() < total);
         AssessmentSession saved = sessionRepo.save(session);
 
         scoreSections(saved, answers);

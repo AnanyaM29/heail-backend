@@ -124,6 +124,12 @@ public class AssessmentService {
         AssessmentSession session = requireOwnedSession(sessionId, email);
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This assessment has already been submitted");
+        // Time's up: once the deadline has passed the assessment is over and no further
+        // answers are accepted. A small grace absorbs the last autosave racing the final
+        // forced submit the client fires when its own countdown hits zero.
+        if (session.getDeadlineAt() != null
+                && LocalDateTime.now().isAfter(session.getDeadlineAt().plusSeconds(20)))
+            throw new IllegalStateException("The time for this assessment has ended.");
         if (!session.getQuestionIds().contains(req.getQuestionId()))
             throw new IllegalArgumentException("Question is not part of this session");
 
@@ -171,6 +177,9 @@ public class AssessmentService {
         if (answers.size() < total && !(forced && timeExpired))
             throw new IllegalArgumentException(
                     "Answer all " + total + " questions before submitting (" + answers.size() + " answered)");
+        // Ran out of time with questions still unanswered — the result stands, marked as a
+        // timeout; the percentage reported is marks achieved out of the full paper.
+        boolean timedOut = forced && timeExpired && answers.size() < total;
 
         Map<String, LeaderQuestionBank> questionsById = questionBankRepo
                 .findByQuestionIdIn(answers.stream().map(Answer::getQuestionId).toList()).stream()
@@ -198,12 +207,14 @@ public class AssessmentService {
         result.setOverallScore((short) overall);
         result.setBand(bandFor(overall));
         result.setDomainScores(domainScores);
+        result.setTimedOut(timedOut);
         if (strongestAnswer != null) result.setStrongestPrinciple(questionsById.get(strongestAnswer.getQuestionId()).getPrincipleCode());
         if (weakestAnswer != null) result.setWeakestPrinciple(questionsById.get(weakestAnswer.getQuestionId()).getPrincipleCode());
         result = leaderResultRepo.save(result);
 
         session.setStatus(SessionStatus.COMPLETED);
         session.setCompletedAt(LocalDateTime.now());
+        session.setTimedOut(timedOut);
         sessionRepo.save(session);
 
         emailService.sendLeaderResultsReady(session.getUser().getEmail(), session.getUser().getName());
@@ -270,6 +281,7 @@ public class AssessmentService {
         dto.setAttemptNumber(r.getAttemptNumber());
         dto.setOverallScore(r.getOverallScore());
         dto.setBand(r.getBand().name());
+        dto.setTimedOut(r.isTimedOut());
         dto.setDomainScores(r.getDomainScores());
         dto.setStrongestPrinciple(r.getStrongestPrinciple());
         dto.setWeakestPrinciple(r.getWeakestPrinciple());

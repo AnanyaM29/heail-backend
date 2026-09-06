@@ -40,7 +40,6 @@ public class OrgOrderService {
     private final OrganisationRepository orgRepo;
     private final PricingItemRepository pricingRepo;
     private final EmailService emailService;
-    private final AuthService authService;
     private final PasswordEncoder encoder;
     private final InvoiceService invoiceService;
     private final OrgReportService orgReportService;
@@ -438,18 +437,23 @@ public class OrgOrderService {
         return orgReportService.buildReport(order);
     }
 
-    /* ── Create/link a User per employee row, dispatch OTP + invitation ── */
+    /* ── Create/link a User per employee row, dispatch the invitation ──
+       A brand-new account gets a generated password included in the invitation
+       email (which goes only to the respondent, never CC'd) so they can sign in
+       straight away; an already-existing account is told to use its own login. */
     private void fulfil(Order order, List<OrderEmployee> employees) {
         Organisation organisation = order.getUser().getOrganisation();
 
         for (OrderEmployee emp : employees) {
             User user = userRepo.findByEmail(emp.getEmail()).orElse(null);
+            String issuedPassword = null;
 
             if (user == null) {
+                issuedPassword = generateInvitePassword();
                 user = new User();
                 user.setName(emp.getName());
                 user.setEmail(emp.getEmail());
-                user.setPasswordHash(encoder.encode(UUID.randomUUID().toString()));
+                user.setPasswordHash(encoder.encode(issuedPassword));
                 user.setRole("EMPLOYEE");
                 user.setOrganisation(organisation);
                 user.setRespondentLevel(emp.getLevel());
@@ -463,11 +467,9 @@ public class OrgOrderService {
             emp.setUser(user);
 
             try {
-                ForgotPasswordRequest fpReq = new ForgotPasswordRequest();
-                fpReq.setEmail(user.getEmail());
-                authService.forgotPassword(fpReq);
                 emailService.sendEmployeeInvitation(user.getEmail(), emp.getName(),
-                        organisation != null ? organisation.getName() : "your organisation");
+                        organisation != null ? organisation.getName() : "your organisation",
+                        issuedPassword);
                 emp.setInvitationStatus("SENT");
             } catch (Exception e) {
                 log.error("Failed to dispatch invitation to {}: {}", emp.getEmail(), e.getMessage());
@@ -475,6 +477,17 @@ public class OrgOrderService {
             }
             orderEmployeeRepo.save(emp);
         }
+    }
+
+    /** A short, human-typeable password for a freshly-created respondent account,
+     *  sent to them in the invitation email. Ambiguous characters (0/O, 1/l/I)
+     *  are left out. They can change it after signing in. */
+    private static String generateInvitePassword() {
+        String alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        java.security.SecureRandom rnd = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(10);
+        for (int i = 0; i < 10; i++) sb.append(alphabet.charAt(rnd.nextInt(alphabet.length())));
+        return sb.toString();
     }
 
     /* ── Private helpers ───────────────────────────────────────── */

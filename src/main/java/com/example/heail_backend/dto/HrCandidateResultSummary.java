@@ -12,4 +12,7 @@ public class HrCandidateResultSummary {
     String assessmentName;
     boolean completed;
     Short overallScore; // null until completed
+    /** True when the attempt was closed by the deadline; overallScore is then the
+     *  percentage of marks achieved before time ran out. */
+    boolean timedOut;
 }

@@ -61,6 +61,12 @@ public class AssessmentSession {
     @Column(name = "resume_grants_used", nullable = false, columnDefinition = "integer default 0")
     int resumeGrantsUsed;
 
+    /** True when this session was submitted only because the deadline passed — the
+     *  respondent ran out of time rather than finishing. The result is still scored
+     *  on whatever was answered. */
+    @Column(name = "timed_out", nullable = false, columnDefinition = "boolean default false")
+    boolean timedOut;
+
     @PrePersist
     void prePersist() {
         this.startedAt = LocalDateTime.now();

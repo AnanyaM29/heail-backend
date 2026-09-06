@@ -59,6 +59,12 @@ public class HrResult {
     @Column(name = "weakest_competency", length = 10)
     String weakestCompetency;
 
+    /** True when this attempt was closed by the 30-minute deadline with questions
+     *  still unanswered. overallScore is then marks achieved out of the full paper
+     *  (unanswered questions count as zero). */
+    @Column(name = "timed_out", nullable = false, columnDefinition = "boolean default false")
+    boolean timedOut;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     LocalDateTime createdAt;
 

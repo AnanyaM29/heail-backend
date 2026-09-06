@@ -27,5 +27,9 @@ public class HrResultResponse {
     String strongestCompetencyName;
     String weakestCompetency;
     String weakestCompetencyName;
+    /** True when the attempt was closed out by the 30-minute deadline rather than
+     *  finished. A status, not a score, so it is shown to the taker too — their
+     *  record reads "Assessment Timed Out" instead of "Completed". */
+    boolean timedOut;
     LocalDateTime createdAt;
 }
