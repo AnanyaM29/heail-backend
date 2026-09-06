@@ -239,9 +239,23 @@ public class HrOrderService {
                     // offered — the assessment stays with whoever the buyer registered.
                     dto.setCanRequestRetake(c.getUser() != null && !"PENDING".equals(c.getStatus()));
                     if (c.getUser() != null) {
+                        // A candidate's throwaway account is matched by email and may be
+                        // reused across orders/retakes, and it can carry stale rows from
+                        // earlier testing — so scope results to the pillars THIS order
+                        // bought and to sessions started on/after this candidate row was
+                        // created. Otherwise one purchased pillar can show as several.
+                        Set<Short> pillars = new HashSet<>(selectedPillarIds(c.getOrder()));
+                        LocalDateTime from = c.getCreatedAt();
                         dto.setResults(hrResultRepo.findByUserOrderByCreatedAtDesc(c.getUser()).stream()
+                                .filter(r -> pillars.isEmpty() || pillars.contains(r.getAssessment().getId()))
+                                .filter(r -> {
+                                    AssessmentSession s = r.getSession();
+                                    return from == null || s == null || s.getStartedAt() == null
+                                            || !s.getStartedAt().isBefore(from);
+                                })
                                 .map(r -> new HrCandidateResultSummary(r.getAssessment().getId(),
-                                        r.getAssessment().getName(), true, r.getOverallScore(), r.isTimedOut()))
+                                        r.getAssessment().getName(), true,
+                                        clampPercent(r.getOverallScore()), r.isTimedOut()))
                                 .toList());
                     }
                     return dto;
@@ -493,6 +507,14 @@ public class HrOrderService {
 
         emailService.sendCandidateInvitation(candidate.getEmail(), candidate.getName(), pillarNames,
                 candidate.getAccessToken(), candidate.getTokenExpiresAt());
+    }
+
+    /** Clamps a stored score to a sane 0-100 percentage. Legacy rows written
+     *  before scoring moved to percentages hold raw sums (e.g. 138) — those
+     *  must never surface to a buyer as "138%". */
+    private static Short clampPercent(Short score) {
+        if (score == null) return null;
+        return (short) Math.max(0, Math.min(100, score));
     }
 
     /** Pillar IDs currently selected on an order — used when building a

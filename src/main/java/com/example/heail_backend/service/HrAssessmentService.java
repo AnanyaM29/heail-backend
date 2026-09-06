@@ -370,9 +370,13 @@ public class HrAssessmentService {
     /* ── Private helpers ───────────────────────────────────────── */
 
     /** Rounds a raw score sum to a 0-100 percentage of what was achievable
-     *  ({@code questionCount * MAX_SCORE_PER_QUESTION}). Zero questions -> 0, not NaN. */
+     *  ({@code questionCount * MAX_SCORE_PER_QUESTION}). Zero questions -> 0, not NaN.
+     *  Clamped to [0, 100] so a stray extra answer or a bad score row can never
+     *  surface a percentage above 100. */
     private static int percentage(int scoreSum, int questionCount) {
-        return questionCount == 0 ? 0 : Math.round(scoreSum * 100f / (questionCount * MAX_SCORE_PER_QUESTION));
+        if (questionCount == 0) return 0;
+        int pct = Math.round(scoreSum * 100f / (questionCount * MAX_SCORE_PER_QUESTION));
+        return Math.max(0, Math.min(100, pct));
     }
 
     private static Map<String, Integer> toPercentages(Map<String, Integer> scoreSums, Map<String, Integer> counts) {
