@@ -32,6 +32,15 @@ public class HrAssessmentController {
         return ResponseEntity.ok(hrAssessmentService.listAssessments(auth != null ? auth.getName() : null));
     }
 
+    // Every individual assignment this person holds — one card per assignment,
+    // even when the same pillar was assigned to them more than once. Distinct
+    // from /assessments above, which is the 7-pillar catalogue (one row per
+    // pillar type) used for browsing/buying.
+    @GetMapping("/assessments/mine")
+    public ResponseEntity<List<HrAssignmentDto>> myAssignments(Authentication auth) {
+        return ResponseEntity.ok(hrAssessmentService.listAssignments(auth.getName()));
+    }
+
     @PostMapping("/assessments/{assessmentId}/start")
     public ResponseEntity<HrStartAssessmentResponse> start(@PathVariable short assessmentId, Authentication auth) {
         return ResponseEntity.ok(hrAssessmentService.start(assessmentId, auth.getName()));
@@ -60,7 +69,7 @@ public class HrAssessmentController {
     public ResponseEntity<HrResultResponse> submit(@PathVariable UUID sessionId,
                                                     @RequestParam(defaultValue = "false") boolean forced,
                                                     Authentication auth) {
-        return ResponseEntity.ok(hrAssessmentService.submit(sessionId, auth.getName(), forced));
+        return ResponseEntity.ok(hrAssessmentService.submit(sessionId, auth.getName()));
     }
 
     @GetMapping("/results")

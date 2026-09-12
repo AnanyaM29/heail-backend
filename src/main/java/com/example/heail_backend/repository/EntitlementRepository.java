@@ -11,5 +11,8 @@ import java.util.UUID;
 public interface EntitlementRepository extends JpaRepository<Entitlement, UUID> {
     Optional<Entitlement> findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(User user, String productCode);
     Optional<Entitlement> findFirstByUserAndProductCodeAndUsedTrueOrderByCreatedAtDesc(User user, String productCode);
+    /** Used or not — when this product was first granted to the user, for display
+     *  (e.g. "Assigned <date>" on a dashboard card). */
+    Optional<Entitlement> findFirstByUserAndProductCodeOrderByCreatedAtAsc(User user, String productCode);
     List<Entitlement> findByUser(User user);
 }

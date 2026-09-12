@@ -15,6 +15,9 @@ public class RespondentMembershipDto {
     String invitationStatus;
     String orderStatus;
     LocalDateTime paidAt;
+    /** When this person was added to the round (the employee row was created) —
+     *  not when the round was paid for or when they started answering. */
+    LocalDateTime assignedAt;
     int pulsesCompleted;
     int pulsesTotal;
 }

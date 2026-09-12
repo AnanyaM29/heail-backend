@@ -15,4 +15,5 @@ public class SessionResumeResponse {
     List<QuestionDto> questions;
     Map<String, String> answeredOptions;
     LocalDateTime deadlineAt;
+    LocalDateTime startedAt;
 }

@@ -83,10 +83,9 @@ public class DashboardService {
                         .toList()
         );
 
-        // HR Competency Assessment — all 7 pillars, whichever have activity.
-        res.setHrAssessments(hrAssessmentService.listAssessments(email));
-        res.setHrResults(hrAssessmentService.listResults(email));
-        res.setHrInProgress(hrAssessmentService.listInProgress(email));
+        // HR Competency Assessment — one card per assignment (entitlement), not
+        // per pillar type, so the same pillar assigned twice shows as two cards.
+        res.setHrAssignments(hrAssessmentService.listAssignments(email));
 
         return res;
     }
@@ -104,6 +103,7 @@ public class DashboardService {
         dto.setInvitationStatus(membership.getInvitationStatus());
         dto.setOrderStatus(order.getStatus().name());
         dto.setPaidAt(order.getPaidAt());
+        dto.setAssignedAt(membership.getCreatedAt());
 
         int completed = 0;
         for (String pulseCode : PULSE_SEQUENCE) {

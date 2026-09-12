@@ -38,14 +38,9 @@ public class DashboardResponse {
      *  respondent (their own org and/or any other org that added them by email). */
     List<RespondentMembershipDto> respondentMemberships;
 
-    /** All 7 HR Competency Assessment pillars, each with whether the caller
-     *  currently holds an unused entitlement for it. */
-    List<HrAssessmentDto> hrAssessments;
-
-    /** HR completed attempts, across all 7 pillars. */
-    List<HrResultResponse> hrResults;
-
-    /** HR in-progress sessions, across all 7 pillars — usually 0 or 1, but a
-     *  caller could in principle have more than one pillar mid-attempt. */
-    List<HrSessionResumeResponse> hrInProgress;
+    /** Every individual HR assignment (entitlement) this person holds, across
+     *  all 7 pillars — one entry per assignment. The same pillar shows up as
+     *  more than one entry if it was assigned to them more than once (e.g.
+     *  registered as a candidate on two separate orders). */
+    List<HrAssignmentDto> hrAssignments;
 }

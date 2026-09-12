@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +30,7 @@ public class AssessmentService {
     private final AnswerRepository answerRepo;
     private final LeaderQuestionBankRepository questionBankRepo;
     private final LeaderResultRepository leaderResultRepo;
+    private final LeaderPrincipleRepository leaderPrincipleRepo;
     private final UserRepository userRepo;
     private final EmailService emailService;
 
@@ -131,6 +133,7 @@ public class AssessmentService {
         res.setQuestions(toOrderedQuestionDtos(session.getQuestionIds(), session.getId()));
         res.setAnsweredOptions(answered);
         res.setDeadlineAt(session.getDeadlineAt());
+        res.setStartedAt(session.getStartedAt());
         return res;
     }
 
@@ -309,9 +312,16 @@ public class AssessmentService {
         dto.setWeakestPrinciple(r.getWeakestPrinciple());
         dto.setCreatedAt(r.getCreatedAt());
 
+        // Prefer the principle's own name (leader_principle table); fall back to the
+        // wording of the question the person actually answered for it if that code
+        // has no name row yet.
+        Map<String, String> principleNames = leaderPrincipleRepo.findAllById(
+                        Stream.of(r.getStrongestPrinciple(), r.getWeakestPrinciple())
+                                .filter(Objects::nonNull).distinct().toList()).stream()
+                .collect(Collectors.toMap(LeaderPrinciple::getCode, LeaderPrinciple::getName));
         Map<String, String> principleTexts = principleTexts(r.getSession().getId(), r.getStrongestPrinciple(), r.getWeakestPrinciple());
-        dto.setStrongestPrincipleText(principleTexts.get(r.getStrongestPrinciple()));
-        dto.setWeakestPrincipleText(principleTexts.get(r.getWeakestPrinciple()));
+        dto.setStrongestPrincipleText(principleNames.getOrDefault(r.getStrongestPrinciple(), principleTexts.get(r.getStrongestPrinciple())));
+        dto.setWeakestPrincipleText(principleNames.getOrDefault(r.getWeakestPrinciple(), principleTexts.get(r.getWeakestPrinciple())));
         return dto;
     }
 

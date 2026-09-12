@@ -23,13 +23,15 @@ public class PulseAssessmentController {
     private final PulseAssessmentService pulseService;
 
     @GetMapping("/status")
-    public ResponseEntity<PulseStatusResponse> status(Authentication auth) {
-        return ResponseEntity.ok(pulseService.status(auth.getName()));
+    public ResponseEntity<PulseStatusResponse> status(@RequestParam(required = false) UUID orderId, Authentication auth) {
+        return ResponseEntity.ok(pulseService.status(auth.getName(), orderId));
     }
 
     @PostMapping("/{pulseCode}/start")
-    public ResponseEntity<StartAssessmentResponse> start(@PathVariable String pulseCode, Authentication auth) {
-        return ResponseEntity.ok(pulseService.start(pulseCode, auth.getName()));
+    public ResponseEntity<StartAssessmentResponse> start(@PathVariable String pulseCode,
+                                                          @RequestParam(required = false) UUID orderId,
+                                                          Authentication auth) {
+        return ResponseEntity.ok(pulseService.start(pulseCode, auth.getName(), orderId));
     }
 
     @GetMapping("/{sessionId}")

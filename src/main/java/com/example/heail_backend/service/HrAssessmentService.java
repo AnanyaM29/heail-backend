@@ -71,8 +71,80 @@ public class HrAssessmentService {
             dto.setEntitled(user != null && entitlementRepo
                     .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, productCodeFor(a.getId()))
                     .isPresent());
+            // start() consumes the entitlement immediately, so a pillar the candidate has
+            // already begun but not finished would otherwise flip to "not entitled, not
+            // completed" and simply vanish from their list — surface it explicitly instead.
+            if (user != null) {
+                sessionRepo.findFirstByUserAndProductCodeAndStatusOrderByStartedAtDesc(
+                                user, productCodeFor(a.getId()), SessionStatus.IN_PROGRESS)
+                        .ifPresent(s -> dto.setInProgressSessionId(s.getId()));
+                entitlementRepo.findFirstByUserAndProductCodeOrderByCreatedAtAsc(user, productCodeFor(a.getId()))
+                        .ifPresent(e -> dto.setAssignedAt(e.getCreatedAt()));
+            }
             return dto;
         }).toList();
+    }
+
+    /* ── Every individual assignment (entitlement) this person holds, across
+       all 7 pillars — one card per assignment, even when the same pillar was
+       assigned to them more than once (registered as a candidate on two
+       separate orders). Entitlements and sessions aren't directly linked in
+       the schema, but start() always consumes the OLDEST unused entitlement
+       and assigns the next sequential attemptNumber, so pairing entitlement #i
+       (oldest-first) with session #i (attemptNumber order) recovers exactly
+       which assignment each session belongs to. ─────────────────────────── */
+    @Transactional(readOnly = true)
+    public List<HrAssignmentDto> listAssignments(String email) {
+        User user = requireUser(email);
+
+        List<Entitlement> allEntitlements = entitlementRepo.findByUser(user);
+        List<HrResult> allResults = hrResultRepo.findByUserOrderByCreatedAtDesc(user);
+
+        List<HrAssignmentDto> out = new ArrayList<>();
+        for (HrAssessment a : hrAssessmentRepo.findAllByOrderByIdAsc()) {
+            String productCode = productCodeFor(a.getId());
+
+            List<Entitlement> entitlements = allEntitlements.stream()
+                    .filter(e -> e.getProductCode().equals(productCode))
+                    .sorted(Comparator.comparing(Entitlement::getCreatedAt))
+                    .toList();
+            if (entitlements.isEmpty()) continue; // never assigned this pillar at all
+
+            List<AssessmentSession> sessions = sessionRepo.findByUserAndProductCodeOrderByAttemptNumberDesc(user, productCode)
+                    .stream().sorted(Comparator.comparingInt(AssessmentSession::getAttemptNumber)).toList();
+
+            Map<Integer, HrResult> resultsByAttempt = allResults.stream()
+                    .filter(r -> r.getAssessment().getId() == a.getId())
+                    .collect(Collectors.toMap(HrResult::getAttemptNumber, r -> r, (x, y) -> x));
+
+            for (int i = 0; i < entitlements.size(); i++) {
+                HrAssignmentDto dto = new HrAssignmentDto();
+                dto.setEntitlementId(entitlements.get(i).getId());
+                dto.setAssessmentId(a.getId());
+                dto.setAssessmentCode(a.getCode());
+                dto.setAssessmentName(a.getName());
+                dto.setQuestionCount(a.getQuestionCount());
+                dto.setTimeMinutes(a.getTimeMinutes());
+                dto.setAssignedAt(entitlements.get(i).getCreatedAt());
+                dto.setAttemptNumber(i + 1);
+
+                AssessmentSession session = i < sessions.size() ? sessions.get(i) : null;
+                if (session == null) {
+                    dto.setStatus("PENDING");
+                } else {
+                    dto.setSessionId(session.getId());
+                    if (session.getStatus() == SessionStatus.IN_PROGRESS) {
+                        dto.setStatus("IN_PROGRESS");
+                    } else {
+                        dto.setStatus("COMPLETED");
+                        HrResult r = resultsByAttempt.get(session.getAttemptNumber());
+                        if (r != null) dto.setTimedOut(r.isTimedOut());
+                    }
+                }
+                out.add(dto);
+            }
+        }
+        return out;
     }
 
     /* ── Start a fresh attempt at one pillar ───────────────────────── */
@@ -220,7 +292,7 @@ public class HrAssessmentService {
 
     /* ── Submit: score, roll up competency/skill-category, persist ── */
     @Transactional
-    public HrResultResponse submit(UUID sessionId, String email, boolean forced) {
+    public HrResultResponse submit(UUID sessionId, String email) {
         AssessmentSession session = requireOwnedHrSession(sessionId, email);
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This assessment has already been submitted");

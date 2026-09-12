@@ -51,9 +51,9 @@ public class PulseAssessmentService {
 
     /* ── All 4 Pulses' state for the calling employee ─────────────── */
     @Transactional(readOnly = true)
-    public PulseStatusResponse status(String email) {
+    public PulseStatusResponse status(String email, UUID orderId) {
         User user = requireUser(email);
-        OrderEmployee membership = requireActiveRound(user);
+        OrderEmployee membership = requireRound(user, orderId);
         Order order = membership.getOrder();
 
         List<PulseInfo> pulses = new ArrayList<>();
@@ -95,12 +95,12 @@ public class PulseAssessmentService {
 
     /* ── Start (or resume, if already in progress) a Pulse ────────── */
     @Transactional
-    public StartAssessmentResponse start(String pulseCode, String email) {
+    public StartAssessmentResponse start(String pulseCode, String email, UUID orderId) {
         if (!PULSE_SEQUENCE.contains(pulseCode))
             throw new IllegalArgumentException("Unknown pulse: " + pulseCode);
 
         User user = requireUser(email);
-        OrderEmployee membership = requireActiveRound(user);
+        OrderEmployee membership = requireRound(user, orderId);
         Order order = membership.getOrder();
         String level = membership.getLevel();
 
@@ -363,11 +363,25 @@ public class PulseAssessmentService {
         };
     }
 
+    /** Resolves which paid round to act on. An explicit orderId (from the dashboard
+     *  card the respondent actually clicked — see MyDashboard.respondentMemberships)
+     *  always wins, so an employee in more than one round is taken to the one they
+     *  meant instead of always landing on the same round. Falls back to the most
+     *  recently paid round when no orderId is given (the bare /pulse entry point,
+     *  and every "take-test" email link route there). */
+    private OrderEmployee requireRound(User user, UUID orderId) {
+        if (orderId != null) {
+            return orderEmployeeRepo.findByUser(user).stream()
+                    .filter(m -> m.getOrder().getId().equals(orderId) && m.getOrder().getStatus() == OrderStatus.PAID)
+                    .findFirst()
+                    .orElseThrow(() -> new AccessDeniedException("No paid diagnostic round found for this account"));
+        }
+        return requireActiveRound(user);
+    }
+
     private OrderEmployee requireActiveRound(User user) {
-        // NOTE: an employee could in principle belong to more than one PAID round (re-added in a
-        // later CSV, or enrolled by a second organisation under the same email). We just take the
-        // most recently paid one for now — proper multi-round support (letting them choose, or
-        // running Pulses per-round) is not handled in this pass.
+        // Most recently paid PAID round for this account — the fallback when the
+        // caller didn't say which round they meant (see requireRound above).
         return orderEmployeeRepo.findByUser(user).stream()
                 .filter(m -> m.getOrder().getStatus() == OrderStatus.PAID)
                 .max(Comparator.comparing(m -> m.getOrder().getPaidAt()))
