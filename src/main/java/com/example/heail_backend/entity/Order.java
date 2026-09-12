@@ -85,8 +85,28 @@ public class Order {
     @Column(columnDefinition = "jsonb")
     Map<String, String> metadata;
 
+    /** The organisation THIS round is for — set once on the first setOrgDetails()
+     *  call for this order (see OrgOrderService). Deliberately separate from
+     *  User.organisation: one HEAIL account (e.g. a superadmin, or a consultant)
+     *  can set up rounds for more than one client company, and each round must
+     *  keep showing its own company name forever, even after the account goes on
+     *  to set up a differently-named round later. Null on orders created before
+     *  this field existed — callers fall back to user.getOrganisation() for those. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "organisation_id")
+    Organisation organisation;
+
     @PrePersist
     void prePersist() {
         this.draftAt = LocalDateTime.now();
+    }
+
+    /** This order's own organisation if it has one, else the buyer account's —
+     *  the fallback only matters for orders created before the `organisation`
+     *  column existed. Every read of "which company is this round for" should
+     *  go through here, never through user.getOrganisation() directly, or a
+     *  later round under the same account can rename an earlier one's company. */
+    public Organisation effectiveOrganisation() {
+        return organisation != null ? organisation : (user != null ? user.getOrganisation() : null);
     }
 }

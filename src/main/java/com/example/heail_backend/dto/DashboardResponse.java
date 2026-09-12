@@ -21,8 +21,11 @@ public class DashboardResponse {
     /** LEADER_CLASSIC (The Gita Leader) completed attempts. */
     List<LeaderResultResponse> leaderResults;
 
-    /** The caller's own in-progress LEADER_CLASSIC session, if any. */
-    SessionResumeResponse leaderInProgress;
+    /** Every one of the caller's own unfinished LEADER_CLASSIC attempts — usually
+     *  0 or 1, but each purchase starts its own independent session, so more than
+     *  one can be in progress at once (e.g. a fresh purchase started while an
+     *  older attempt was left unfinished). Each gets its own card. */
+    List<SessionResumeResponse> leaderInProgress;
 
     /** True if the caller has a LEADER_CLASSIC order that hasn't been paid for yet
      *  (DRAFT/AGREEMENT_ACCEPTED/PAYMENT_INITIATED) — lets the dashboard surface a

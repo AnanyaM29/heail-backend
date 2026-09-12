@@ -5,6 +5,7 @@ import com.example.heail_backend.dto.RespondentMembershipDto;
 import com.example.heail_backend.entity.AssessmentSession;
 import com.example.heail_backend.entity.Order;
 import com.example.heail_backend.entity.OrderEmployee;
+import com.example.heail_backend.entity.Organisation;
 import com.example.heail_backend.entity.OrderStatus;
 import com.example.heail_backend.entity.SessionStatus;
 import com.example.heail_backend.entity.User;
@@ -67,7 +68,7 @@ public class DashboardService {
 
         // Individual Leader activity — completed attempts and any session in progress.
         res.setLeaderResults(assessmentService.listResults(email));
-        res.setLeaderInProgress(assessmentService.current(email).orElse(null));
+        res.setLeaderInProgress(assessmentService.listInProgress(email));
 
         List<Order> leaderOrders = orderRepo.findByUserAndProductCodeOrderByDraftAtDesc(user, LEADER_CLASSIC_PRODUCT);
         res.setLeaderUnpaidOrder(!leaderOrders.isEmpty() && leaderOrders.get(0).getStatus() != OrderStatus.PAID
@@ -93,11 +94,15 @@ public class DashboardService {
     private RespondentMembershipDto toMembership(OrderEmployee membership) {
         Order order = membership.getOrder();
         User admin = order.getUser();
+        // This round's OWN organisation — never the admin account's CURRENT
+        // organisation, which could since have been renamed for an unrelated,
+        // later round set up under the same account (see Order.organisation).
+        Organisation organisation = order.effectiveOrganisation();
 
         RespondentMembershipDto dto = new RespondentMembershipDto();
         dto.setOrderId(order.getId());
         dto.setOrganisationName(
-                admin.getOrganisation() != null ? admin.getOrganisation().getName()
+                organisation != null ? organisation.getName()
                         : admin.getName() + "'s organisation");
         dto.setLevel(membership.getLevel());
         dto.setInvitationStatus(membership.getInvitationStatus());

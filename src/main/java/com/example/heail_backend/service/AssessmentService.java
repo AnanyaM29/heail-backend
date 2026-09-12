@@ -41,21 +41,14 @@ public class AssessmentService {
     public StartAssessmentResponse start(String email) {
         User user = requireUser(email);
 
-        // Never start a second sitting on top of a live one — that orphans the first
-        // (its entitlement already spent) and it lingers forever as "Resume". Hand back
-        // the in-progress session instead.
-        AssessmentSession existing = sessionRepo
-                .findFirstByUserAndProductCodeAndStatusOrderByStartedAtDesc(
-                        user, LEADER_CLASSIC_PRODUCT, SessionStatus.IN_PROGRESS)
-                .orElse(null);
-        if (existing != null) {
-            StartAssessmentResponse res = new StartAssessmentResponse();
-            res.setSessionId(existing.getId());
-            res.setAttemptNumber(existing.getAttemptNumber());
-            res.setQuestions(toOrderedQuestionDtos(existing.getQuestionIds(), existing.getId()));
-            res.setDeadlineAt(existing.getDeadlineAt());
-            return res;
-        }
+        // Every purchased entitlement gets its own independent attempt — its own
+        // fresh question draw, its own 30-minute deadline from the moment THIS
+        // start() call runs. Reusing an older in-progress session here (an earlier
+        // attempt at this) meant paying for a new sitting and clicking "Start
+        // Assessment" could hand back a stale, half-answered, nearly-timed-out
+        // session instead of the fresh one just paid for. An abandoned older
+        // session isn't lost — it's still reachable/resumable on its own and will
+        // simply time itself out (see submit()'s timedOut handling) if left alone.
 
         Entitlement entitlement = entitlementRepo
                 .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, LEADER_CLASSIC_PRODUCT)
@@ -114,6 +107,21 @@ public class AssessmentService {
         return sessionRepo
                 .findFirstByUserAndProductCodeAndStatusOrderByStartedAtDesc(user, LEADER_CLASSIC_PRODUCT, SessionStatus.IN_PROGRESS)
                 .map(session -> resume(session.getId(), email));
+    }
+
+    /* ── Every unfinished attempt, not just the most recent — since start()
+       gives each purchase its own independent session, more than one can be
+       IN_PROGRESS at once (e.g. a new purchase started while an older attempt
+       was left unfinished). The unified dashboard shows each as its own card
+       so none of them are invisible. ─────────────────────────────────────── */
+    @Transactional
+    public List<SessionResumeResponse> listInProgress(String email) {
+        User user = requireUser(email);
+        return sessionRepo.findByUserAndProductCodeOrderByAttemptNumberDesc(user, LEADER_CLASSIC_PRODUCT).stream()
+                .filter(s -> s.getStatus() == SessionStatus.IN_PROGRESS)
+                .sorted(Comparator.comparingInt(AssessmentSession::getAttemptNumber))
+                .map(s -> resume(s.getId(), email))
+                .toList();
     }
 
     /* ── Resume: current questions + what's already answered ─────── */

@@ -136,7 +136,7 @@ public class OrgOrderService {
         if (order.getStatus() != OrderStatus.DRAFT)
             throw new IllegalArgumentException("Employees can only be set on a draft order");
 
-        Organisation organisation = order.getUser().getOrganisation();
+        Organisation organisation = order.effectiveOrganisation();
         if (organisation == null || organisation.getHeadcount() == null)
             throw new IllegalStateException("Organisation headcount is not set on this account");
         int minRequired = minRequiredEmployees(organisation.getHeadcount());
@@ -245,16 +245,27 @@ public class OrgOrderService {
             throw new IllegalArgumentException("Organisation headcount is required");
 
         User user = order.getUser();
-        Organisation organisation = user.getOrganisation();
-        boolean isNew = organisation == null;
-        if (isNew) organisation = new Organisation();
+        // This order's OWN organisation, if an earlier setOrgDetails() call on this
+        // same draft already created one (fixing a typo before paying) — never the
+        // user's organisation from a DIFFERENT order. Reusing/renaming that one
+        // would retroactively change the company name shown on that other round's
+        // dashboard cards, reports and reminder emails too (see Order.organisation).
+        Organisation organisation = order.getOrganisation();
+        boolean firstOrgForAccount = user.getOrganisation() == null;
+        if (organisation == null) organisation = new Organisation();
 
         organisation.setName(organisationName);
         organisation.setHeadcount(headcount);
         if (industry != null && !industry.isBlank()) organisation.setIndustry(industry);
         organisation = orgRepo.save(organisation);
 
-        if (isNew) {
+        order.setOrganisation(organisation);
+        orderRepo.save(order);
+
+        // The account's own "home" organisation is set once, from its first-ever
+        // round — a later round for a different client must not change what the
+        // account itself is considered to belong to.
+        if (firstOrgForAccount) {
             user.setOrganisation(organisation);
             if ("LEADER".equals(user.getRole())) user.setRole("ORG_ADMIN");
             userRepo.save(user);
@@ -442,7 +453,7 @@ public class OrgOrderService {
        email (which goes only to the respondent, never CC'd) so they can sign in
        straight away; an already-existing account is told to use its own login. */
     private void fulfil(Order order, List<OrderEmployee> employees) {
-        Organisation organisation = order.getUser().getOrganisation();
+        Organisation organisation = order.effectiveOrganisation();
 
         for (OrderEmployee emp : employees) {
             User user = userRepo.findByEmail(emp.getEmail()).orElse(null);
@@ -509,7 +520,7 @@ public class OrgOrderService {
         res.setOrder(toOrderResponse(order));
         res.setEmployees(orderEmployeeRepo.findByOrder(order).stream().map(this::toEmployeeDto).toList());
 
-        Organisation organisation = order.getUser().getOrganisation();
+        Organisation organisation = order.effectiveOrganisation();
         if (organisation != null) {
             res.setOrgName(organisation.getName());
             res.setOrgHeadcount(organisation.getHeadcount());

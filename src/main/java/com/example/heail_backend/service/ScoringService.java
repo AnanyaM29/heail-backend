@@ -114,8 +114,11 @@ public class ScoringService {
 
         OrgReportResponse res = new OrgReportResponse();
         res.setOrderId(order.getId());
-        res.setOrganisationName(order.getUser().getOrganisation() != null
-                ? order.getUser().getOrganisation().getName() : null);
+        // This round's OWN organisation — never the buyer account's current one,
+        // which could since have been renamed for a later, unrelated round set up
+        // under the same account (see Order.organisation).
+        res.setOrganisationName(order.effectiveOrganisation() != null
+                ? order.effectiveOrganisation().getName() : null);
         res.setReleasedAt(order.getReportReleasedAt());
         res.setRespondentCount(completedEmployees.size());
         res.setTotalEmployees(completedEmployees.size());

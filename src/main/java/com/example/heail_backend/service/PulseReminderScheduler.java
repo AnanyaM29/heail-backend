@@ -79,8 +79,9 @@ public class PulseReminderScheduler {
             if (anyStarted) {
                 emailService.sendEmployeeReminderPending(emp.getEmail(), emp.getName(), pendingPulses);
             } else {
-                String orgName = order.getUser().getOrganisation() != null
-                        ? order.getUser().getOrganisation().getName() : "your organisation";
+                // This round's OWN organisation — see Order.organisation.
+                String orgName = order.effectiveOrganisation() != null
+                        ? order.effectiveOrganisation().getName() : "your organisation";
                 emailService.sendEmployeeReminderNotStarted(emp.getEmail(), emp.getName(), orgName);
             }
             emp.setLastReminderAt(now);
