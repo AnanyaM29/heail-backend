@@ -80,6 +80,13 @@ public class HrCandidateAccessService {
             hrCandidateRepo.save(candidate);
         }
 
+        // Records this as the account's current session (no cooldown check here —
+        // the candidate must always be able to reach their own test) so that a
+        // SEPARATE login attempt on this account shortly after (e.g. someone using
+        // the candidate's password on a second machine) is refused by
+        // AuthService.login()'s single-session guard.
+        authService.recordSessionStart(candidate.getUser());
+
         return authService.buildAuthResponse(candidate.getUser());
     }
 

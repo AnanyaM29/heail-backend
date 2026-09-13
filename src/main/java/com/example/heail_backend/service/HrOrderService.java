@@ -420,7 +420,9 @@ public class HrOrderService {
             user.setName(candidate.getName());
             user.setEmail(candidate.getEmail());
             user.setPasswordHash(encoder.encode(UUID.randomUUID().toString()));
-            user.setRole("EMPLOYEE");
+            // Every account created platform-wide is ORG_ADMIN now, this
+            // throwaway candidate account included — see AuthService.register().
+            user.setRole("ORG_ADMIN");
             user.setMobile(candidate.getMobile());
             user = userRepo.save(user);
         }

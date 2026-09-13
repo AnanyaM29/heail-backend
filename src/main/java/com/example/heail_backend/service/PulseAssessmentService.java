@@ -230,6 +230,14 @@ public class PulseAssessmentService {
         session.setTimedOut(timeExpired && answers.size() < total);
         AssessmentSession saved = sessionRepo.save(session);
 
+        // A submitted Pulse is the natural end of this sitting — clear the
+        // single-session flag so this account isn't stuck unable to log back in
+        // just because the respondent closed the browser instead of logging out
+        // (see AuthService.enforceSingleSession()).
+        User submitter = saved.getUser();
+        submitter.setSessionActive(false);
+        userRepo.save(submitter);
+
         scoreSections(saved, answers);
 
         User sessionUser = saved.getUser();

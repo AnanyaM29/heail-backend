@@ -41,9 +41,12 @@ public class HrAssessmentController {
         return ResponseEntity.ok(hrAssessmentService.listAssignments(auth.getName()));
     }
 
-    @PostMapping("/assessments/{assessmentId}/start")
-    public ResponseEntity<HrStartAssessmentResponse> start(@PathVariable short assessmentId, Authentication auth) {
-        return ResponseEntity.ok(hrAssessmentService.start(assessmentId, auth.getName()));
+    // Keyed by entitlementId — the specific assignment — not by pillar type, so
+    // starting always acts on exactly the assignment the caller picked even when
+    // the same pillar was assigned to them more than once (see HrAssignmentDto).
+    @PostMapping("/assignments/{entitlementId}/start")
+    public ResponseEntity<HrStartAssessmentResponse> start(@PathVariable UUID entitlementId, Authentication auth) {
+        return ResponseEntity.ok(hrAssessmentService.start(entitlementId, auth.getName()));
     }
 
     @GetMapping("/assessments/{assessmentId}/current")

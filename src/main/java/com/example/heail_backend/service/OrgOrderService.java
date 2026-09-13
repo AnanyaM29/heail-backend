@@ -465,7 +465,9 @@ public class OrgOrderService {
                 user.setName(emp.getName());
                 user.setEmail(emp.getEmail());
                 user.setPasswordHash(encoder.encode(issuedPassword));
-                user.setRole("EMPLOYEE");
+                // Every account created platform-wide is ORG_ADMIN now, this
+                // respondent invite included — see AuthService.register().
+                user.setRole("ORG_ADMIN");
                 user.setOrganisation(organisation);
                 user.setRespondentLevel(emp.getLevel());
                 user = userRepo.save(user);

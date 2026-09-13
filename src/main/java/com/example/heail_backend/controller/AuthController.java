@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -36,6 +37,17 @@ public class AuthController {
     @PostMapping("/refresh")
     public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshRequest req) {
         return ResponseEntity.ok(authService.refresh(req));
+    }
+
+    // Clears the single-session flag (see AuthService.login()) so the account
+    // can sign in elsewhere immediately. auth is null if no valid access token
+    // was presented (e.g. it already expired) — nothing to clear in that case,
+    // so this just no-ops rather than erroring; logout should never fail from
+    // the caller's point of view.
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, String>> logout(Authentication auth) {
+        if (auth != null) authService.logout(auth.getName());
+        return ResponseEntity.ok(Map.of("message", "Logged out"));
     }
 
     @PostMapping("/forgot-password")

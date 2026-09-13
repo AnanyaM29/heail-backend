@@ -67,6 +67,14 @@ public class AssessmentSession {
     @Column(name = "timed_out", nullable = false, columnDefinition = "boolean default false")
     boolean timedOut;
 
+    /** The specific entitlement this session was started from — null for sessions
+     *  created before this link existed. HR uses it to pair a session back to the
+     *  exact assignment it belongs to, since the same pillar can be assigned to a
+     *  person more than once (see HrAssessmentService.listAssignments). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "entitlement_id")
+    Entitlement entitlement;
+
     @PrePersist
     void prePersist() {
         this.startedAt = LocalDateTime.now();

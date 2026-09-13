@@ -113,25 +113,40 @@ public class HrAssessmentService {
             List<AssessmentSession> sessions = sessionRepo.findByUserAndProductCodeOrderByAttemptNumberDesc(user, productCode)
                     .stream().sorted(Comparator.comparingInt(AssessmentSession::getAttemptNumber)).toList();
 
+            // Sessions started via the entitlement-specific start() carry a direct
+            // link — use it to pair a session to its exact assignment. A session
+            // from before that link existed (entitlement null) falls back to
+            // positional pairing among whatever's left, in creation order — the
+            // only pairing possible under the old "always consume oldest unused"
+            // start() rule, and still correct for that pre-existing data.
+            Map<UUID, AssessmentSession> sessionByEntitlementId = new HashMap<>();
+            Deque<AssessmentSession> legacySessions = new ArrayDeque<>();
+            for (AssessmentSession s : sessions) {
+                if (s.getEntitlement() != null) sessionByEntitlementId.put(s.getEntitlement().getId(), s);
+                else legacySessions.addLast(s);
+            }
+
             Map<Integer, HrResult> resultsByAttempt = allResults.stream()
                     .filter(r -> r.getAssessment().getId() == a.getId())
                     .collect(Collectors.toMap(HrResult::getAttemptNumber, r -> r, (x, y) -> x));
 
             for (int i = 0; i < entitlements.size(); i++) {
+                Entitlement ent = entitlements.get(i);
                 HrAssignmentDto dto = new HrAssignmentDto();
-                dto.setEntitlementId(entitlements.get(i).getId());
+                dto.setEntitlementId(ent.getId());
                 dto.setAssessmentId(a.getId());
                 dto.setAssessmentCode(a.getCode());
                 dto.setAssessmentName(a.getName());
                 dto.setQuestionCount(a.getQuestionCount());
                 dto.setTimeMinutes(a.getTimeMinutes());
-                dto.setAssignedAt(entitlements.get(i).getCreatedAt());
+                dto.setAssignedAt(ent.getCreatedAt());
                 dto.setAttemptNumber(i + 1);
 
-                AssessmentSession session = i < sessions.size() ? sessions.get(i) : null;
-                if (session == null) {
-                    dto.setStatus("PENDING");
-                } else {
+                AssessmentSession session = sessionByEntitlementId.get(ent.getId());
+                if (session == null && ent.isUsed() && !legacySessions.isEmpty())
+                    session = legacySessions.pollFirst();
+
+                if (session != null) {
                     dto.setSessionId(session.getId());
                     if (session.getStatus() == SessionStatus.IN_PROGRESS) {
                         dto.setStatus("IN_PROGRESS");
@@ -140,6 +155,16 @@ public class HrAssessmentService {
                         HrResult r = resultsByAttempt.get(session.getAttemptNumber());
                         if (r != null) dto.setTimedOut(r.isTimedOut());
                     }
+                } else if (ent.isUsed()) {
+                    // Used, but no session could be matched to it (a gap in legacy
+                    // data predating the direct entitlement<->session link). Never
+                    // show this as PENDING regardless — offering a "Start" button
+                    // that start() would then reject as "already started" is worse
+                    // than an assignment whose in-between state we can't fully
+                    // reconstruct. Best-effort label it done.
+                    dto.setStatus("COMPLETED");
+                } else {
+                    dto.setStatus("PENDING");
                 }
                 out.add(dto);
             }
@@ -147,24 +172,28 @@ public class HrAssessmentService {
         return out;
     }
 
-    /* ── Start a fresh attempt at one pillar ───────────────────────── */
+    /* ── Start a fresh attempt at one SPECIFIC assignment ────────────
+       Keyed by entitlementId, not by pillar type — a person can be assigned
+       the same pillar more than once (different buyers/orders), each its own
+       independent assignment (see listAssignments()). Starting must act on
+       exactly the assignment the caller picked, never "whichever entitlement
+       of this pillar happens to be oldest/unused" — that silently started the
+       wrong assignment whenever more than one of the same pillar was pending
+       at once. ─────────────────────────────────────────────────────────── */
     @Transactional
-    public HrStartAssessmentResponse start(short assessmentId, String email) {
+    public HrStartAssessmentResponse start(UUID entitlementId, String email) {
         User user = requireUser(email);
+        Entitlement entitlement = entitlementRepo.findById(entitlementId)
+                .filter(e -> e.getUser().getId().equals(user.getId()))
+                .orElseThrow(() -> new IllegalArgumentException("Assignment not found"));
+        if (entitlement.isUsed())
+            throw new AccessDeniedException("This assignment has already been started.");
+        if (!entitlement.getProductCode().startsWith(PRODUCT_PREFIX))
+            throw new IllegalArgumentException("Assignment not found");
+
+        short assessmentId = assessmentIdFromProductCode(entitlement.getProductCode());
         HrAssessment assessment = requireAssessment(assessmentId);
-        String productCode = productCodeFor(assessmentId);
-
-        // Accessible only once — a completed attempt can't be retaken (the entitlement
-        // is also consumed on start below, so this is belt-and-braces for the case of
-        // a stray extra entitlement on the account).
-        boolean alreadyCompleted = sessionRepo.findByUserAndProductCodeOrderByAttemptNumberDesc(user, productCode)
-                .stream().anyMatch(s -> s.getStatus() == SessionStatus.COMPLETED);
-        if (alreadyCompleted)
-            throw new AccessDeniedException(assessment.getName() + " has already been completed and cannot be retaken.");
-
-        Entitlement entitlement = entitlementRepo
-                .findFirstByUserAndProductCodeAndUsedFalseOrderByCreatedAtAsc(user, productCode)
-                .orElseThrow(() -> new AccessDeniedException("No unused entitlement for " + assessment.getName()));
+        String productCode = entitlement.getProductCode();
 
         List<String> questionIds = generateQuestionIds(assessment);
 
@@ -177,6 +206,7 @@ public class HrAssessmentService {
         session.setAttemptNumber(attemptNumber);
         session.setQuestionIds(questionIds);
         session.setStatus(SessionStatus.IN_PROGRESS);
+        session.setEntitlement(entitlement);
         session = sessionRepo.save(session);
 
         entitlement.setUsed(true);
@@ -376,6 +406,14 @@ public class HrAssessmentService {
         session.setCompletedAt(LocalDateTime.now());
         session.setTimedOut(timedOut);
         sessionRepo.save(session);
+
+        // A submitted test is the natural end of this sitting — clear the
+        // single-session flag so this account isn't stuck unable to log back in
+        // just because the candidate closed the browser instead of logging out
+        // (see AuthService.enforceSingleSession()).
+        User submitter = session.getUser();
+        submitter.setSessionActive(false);
+        userRepo.save(submitter);
 
         return toResponse(result);
     }

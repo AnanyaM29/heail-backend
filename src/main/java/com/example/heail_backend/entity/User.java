@@ -47,6 +47,15 @@ public class User {
     @Column(name = "last_login_at")
     LocalDateTime lastLoginAt;
 
+    /** True from the moment this account signs in until it explicitly logs out
+     *  (or a submitted assessment clears it — see submit() in AssessmentService/
+     *  HrAssessmentService/PulseAssessmentService). A second sign-in attempt
+     *  while this is true is refused outright — no cooldown, no waiting it out —
+     *  see AuthService.login(). Assessment-integrity control: this account must
+     *  never be usable from two places at once. */
+    @Column(name = "session_active", nullable = false, columnDefinition = "boolean default false")
+    boolean sessionActive;
+
     @Column(nullable = false, columnDefinition = "boolean not null default true")
     boolean active = true;
 

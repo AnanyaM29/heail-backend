@@ -66,18 +66,17 @@ public class AuthService {
         if (!token.getOtp().equals(req.getOtp()))
             throw new IllegalArgumentException("Incorrect code");
 
-        // Only one type of account is created here — a bare "LEADER" account
-        // with no organisation attached. Anything role/organisation-specific
-        // (setting up an org round, its headcount, its industry) is deferred
-        // to the buy-org flow, right before payment — see
-        // OrgOrderService.setOrgDetails, which promotes this account to
-        // ORG_ADMIN on demand. EMPLOYEE accounts are never self-registered;
-        // they're always created by OrgOrderService.fulfil() from an invite.
+        // Every self-registered account is created as ORG_ADMIN — the platform no
+        // longer distinguishes LEADER/EMPLOYEE/ORG_ADMIN for a freshly created
+        // account; only SUPERADMIN (seeded separately, see SuperAdminSeeder) is
+        // ever anything else. Ownership of orders/sessions/entitlements is still
+        // enforced by email everywhere, so this is not a privilege change for
+        // what an account can act on — only what it's labelled.
         User user = new User();
         user.setName(req.getName());
         user.setEmail(req.getEmail().toLowerCase());
         user.setPasswordHash(encoder.encode(req.getPassword()));
-        user.setRole("LEADER");
+        user.setRole("ORG_ADMIN");
         user.setCity(req.getCity());
         user.setCountry(req.getCountry());
         user.setMobile(req.getMobile());
@@ -102,10 +101,53 @@ public class AuthService {
         if (!user.isActive() || user.getDeletedAt() != null)
             throw new IllegalArgumentException("This account is no longer active");
 
-        user.setLastLoginAt(LocalDateTime.now());
-        userRepo.save(user);
+        enforceSingleSession(user);
+        recordSessionStart(user);
 
         return buildAuthResponse(user);
+    }
+
+    /** Assessment-integrity control: an account already signed in somewhere is
+     *  refused outright here — no cooldown, no waiting it out. The only way
+     *  back in is an explicit logout (see logout() below) or a submitted
+     *  assessment clearing the flag itself (see submit() in AssessmentService/
+     *  HrAssessmentService/PulseAssessmentService — the natural end of a test,
+     *  so a candidate who just closes the browser after finishing isn't
+     *  permanently locked out). SUPERADMIN is exempt — this exists for
+     *  assessment integrity, not to slow down staff/admin work.
+     *
+     *  Deliberately NOT applied to HrCandidateAccessService.redeem() itself — a
+     *  candidate re-clicking their own emailed link to resume their own
+     *  interrupted attempt must never be locked out by this; that flow already
+     *  has its own one-time-per-assignment guard. redeem() does still call
+     *  recordSessionStart() below, so a SEPARATE login attempt (e.g. someone
+     *  using the candidate's password on a second machine) is correctly
+     *  refused here. */
+    private void enforceSingleSession(User user) {
+        if ("SUPERADMIN".equals(user.getRole())) return;
+        if (user.isSessionActive())
+            throw new IllegalArgumentException(
+                    "This account is already logged in elsewhere. Please log out there first before signing in again.");
+    }
+
+    /** Marks this account as having an active session — used by login() (after
+     *  the check above passes) and by HrCandidateAccessService.redeem() (which
+     *  never runs that check itself). */
+    void recordSessionStart(User user) {
+        user.setLastLoginAt(LocalDateTime.now());
+        user.setSessionActive(true);
+        userRepo.save(user);
+    }
+
+    /* ── LOGOUT: clears the single-session flag so the account can sign in
+       elsewhere immediately — no cooldown to wait out. Safe to call with no
+       valid token (the controller no-ops in that case); safe to call twice. */
+    @Transactional
+    public void logout(String email) {
+        userRepo.findByEmail(email).ifPresent(user -> {
+            user.setSessionActive(false);
+            userRepo.save(user);
+        });
     }
 
     /* ── REFRESH ───────────────────────────────────────────────── */

@@ -250,6 +250,14 @@ public class AssessmentService {
         session.setTimedOut(timedOut);
         sessionRepo.save(session);
 
+        // A submitted test is the natural end of this sitting — clear the
+        // single-session flag so this account isn't stuck unable to log back in
+        // just because the candidate closed the browser instead of logging out
+        // (see AuthService.enforceSingleSession()).
+        User submitter = session.getUser();
+        submitter.setSessionActive(false);
+        userRepo.save(submitter);
+
         emailService.sendLeaderResultsReady(session.getUser().getEmail(), session.getUser().getName());
 
         return toResponse(result);
