@@ -2,7 +2,6 @@ package com.example.heail_backend.service;
 
 import com.example.heail_backend.dto.AuthResponse;
 import com.example.heail_backend.dto.HrCandidateTokenInfoResponse;
-import com.example.heail_backend.entity.Entitlement;
 import com.example.heail_backend.entity.HrAssessment;
 import com.example.heail_backend.entity.HrCandidate;
 import com.example.heail_backend.repository.EntitlementRepository;
@@ -35,6 +34,7 @@ public class HrCandidateAccessService {
     private final HrAssessmentRepository hrAssessmentRepo;
     private final EntitlementRepository entitlementRepo;
     private final AuthService authService;
+    private final HrOrderService hrOrderService;
 
     @Transactional(readOnly = true)
     public HrCandidateTokenInfoResponse tokenInfo(String token) {
@@ -90,13 +90,11 @@ public class HrCandidateAccessService {
         return authService.buildAuthResponse(candidate.getUser());
     }
 
+    /** Just the pillars selected on THIS candidate's own order — not every
+     *  pillar their account has ever been assigned across other orders (the
+     *  same person can be registered as a candidate more than once). */
     private List<String> assessmentNamesFor(HrCandidate candidate) {
-        if (candidate.getUser() == null) return List.of();
-        return entitlementRepo.findByUser(candidate.getUser()).stream()
-                .map(Entitlement::getProductCode)
-                .filter(code -> code.startsWith("HR_A"))
-                .distinct()
-                .map(code -> Short.parseShort(code.substring("HR_A".length())))
+        return hrOrderService.selectedPillarIds(candidate.getOrder()).stream()
                 .map(id -> hrAssessmentRepo.findById(id).map(HrAssessment::getName).orElse(null))
                 .filter(java.util.Objects::nonNull)
                 .toList();

@@ -456,8 +456,11 @@ public class HrOrderService {
     }
 
     /** Pillar IDs selected on an order — used to scope a candidate's results to
-     *  the pillars that order actually bought. */
-    private List<Short> selectedPillarIds(Order order) {
+     *  the pillars that order actually bought. Package-private: also used by
+     *  HrCandidateAccessService to scope the names shown on the candidate
+     *  landing page to just this order, not every pillar ever assigned to the
+     *  candidate's account across other orders. */
+    List<Short> selectedPillarIds(Order order) {
         return deserializeIds(order.getMetadata() != null ? order.getMetadata().get(SELECTED_IDS_KEY) : null);
     }
 
