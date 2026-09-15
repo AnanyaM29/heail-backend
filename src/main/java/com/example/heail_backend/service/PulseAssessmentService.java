@@ -195,7 +195,10 @@ public class PulseAssessmentService {
         answer.setScore(score);
         answerRepo.save(answer);
 
-        int answeredCount = answerRepo.findBySessionId(sessionId).size();
+        // Distinct: see the duplicate-row race noted in submit() — the same possible
+        // double-insert would otherwise show an inflated "31 of 30 answered" mid-test.
+        int answeredCount = (int) answerRepo.findBySessionId(sessionId).stream()
+                .map(Answer::getQuestionId).distinct().count();
 
         AnswerResponse res = new AnswerResponse();
         res.setQuestionId(req.getQuestionId());
@@ -215,7 +218,15 @@ public class PulseAssessmentService {
         // distinct: answers are one-per-question, so a repeated id in the stored list
         // would otherwise inflate the target and permanently block submission.
         int total = (int) session.getQuestionIds().stream().distinct().count();
-        List<Answer> answers = answerRepo.findBySessionId(sessionId);
+        // answer()'s upsert (find-by-session-and-question, then insert-or-update) has no
+        // DB-level uniqueness backing it — two autosave calls for the same question landing
+        // close together can each miss the other's not-yet-committed row and both insert,
+        // leaving two Answer rows for one question. Collapsing to the most recently answered
+        // row per question makes section scoring correct regardless of whether that race fires.
+        List<Answer> answers = answerRepo.findBySessionId(sessionId).stream()
+                .collect(Collectors.toMap(Answer::getQuestionId, a -> a,
+                        (a, b) -> a.getAnsweredAt().isAfter(b.getAnsweredAt()) ? a : b))
+                .values().stream().toList();
         // Once the server's own clock says the deadline has passed, the sitting is over:
         // answer() is already refusing new answers, so blocking the submit here would just
         // strand the respondent. The bypass depends only on timeExpired (server-authoritative,

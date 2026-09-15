@@ -24,6 +24,7 @@ public class AssessmentService {
     private static final String LEADER_CLASSIC_PRODUCT = "LEADER_CLASSIC";
     private static final List<String> PRINCIPLE_CODES =
             IntStream.rangeClosed(1, 50).mapToObj(i -> String.format("P%02d", i)).toList();
+    private static final int MAX_SCORE_PER_QUESTION = 5;
 
     private final EntitlementRepository entitlementRepo;
     private final AssessmentSessionRepository sessionRepo;
@@ -177,7 +178,10 @@ public class AssessmentService {
         answer.setScore(score);
         answerRepo.save(answer);
 
-        int answeredCount = answerRepo.findBySessionId(sessionId).size();
+        // Distinct: see the duplicate-row race noted in submit() — the same possible
+        // double-insert would otherwise show an inflated "51 of 50 answered" mid-test.
+        int answeredCount = (int) answerRepo.findBySessionId(sessionId).stream()
+                .map(Answer::getQuestionId).distinct().count();
 
         AnswerResponse res = new AnswerResponse();
         res.setQuestionId(req.getQuestionId());
@@ -194,7 +198,17 @@ public class AssessmentService {
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This assessment has already been submitted");
 
-        List<Answer> answers = answerRepo.findBySessionId(sessionId);
+        // answer()'s upsert (findBySessionIdAndQuestionId, then insert-or-update) has no
+        // DB-level uniqueness backing it — two autosave calls for the same question landing
+        // close together (a fast re-click, a client retry after a slow response) can each
+        // miss the other's not-yet-committed row and both insert, leaving two Answer rows
+        // for one question. Collapsing to the most recently answered row per question here
+        // makes scoring correct regardless of whether that race ever produced duplicates,
+        // rather than trusting answerRepo.findBySessionId() to already be one-per-question.
+        List<Answer> answers = answerRepo.findBySessionId(sessionId).stream()
+                .collect(Collectors.toMap(Answer::getQuestionId, a -> a,
+                        (a, b) -> a.getAnsweredAt().isAfter(b.getAnsweredAt()) ? a : b))
+                .values().stream().toList();
         // Distinct ids: answers are one-per-question (upsert), so if the stored id list
         // ever carries a repeat, comparing against the raw size would make the count
         // unreachable and permanently reject the submit.
@@ -215,6 +229,19 @@ public class AssessmentService {
                 .findByQuestionIdIn(answers.stream().map(Answer::getQuestionId).toList()).stream()
                 .collect(Collectors.toMap(LeaderQuestionBank::getQuestionId, q -> q, (a, b) -> a));
 
+        // A principle is meant to belong to exactly one domain, but that domain is stored
+        // per QUESTION ROW, not per principle — and a principle has several candidate
+        // question variants (only one of which gets randomly drawn into any given
+        // session). If a variant was ever tagged with the wrong domain during data entry,
+        // scoring by q.getDomain() lets which domain a principle counts toward drift from
+        // one random draw to the next, so a domain's question count (and therefore its max
+        // achievable score) is no longer reliably 10 questions / 50 points. Resolving
+        // domain by majority vote across ALL of a principle's variants makes the
+        // assignment fixed and attempt-independent, and domainMax below is derived from
+        // that same resolution — so the two can never disagree.
+        Map<String, String> principleDomains = principleDomains();
+        Map<String, Integer> domainMax = domainMaxFor(principleDomains);
+
         Map<String, Integer> domainScores = new LinkedHashMap<>();
         for (String d : List.of("I", "II", "III", "IV", "V")) domainScores.put(d, 0);
 
@@ -227,7 +254,8 @@ public class AssessmentService {
             // An answer whose question is no longer in the bank (bank reloaded mid-flight)
             // simply doesn't contribute — it must not NPE the whole submit and strand the taker.
             if (q == null) continue;
-            if (q.getDomain() != null) domainScores.merge(q.getDomain(), (int) a.getScore(), Integer::sum);
+            String domain = principleDomains.get(q.getPrincipleCode());
+            if (domain != null) domainScores.merge(domain, (int) a.getScore(), Integer::sum);
             overall += a.getScore();
             if (strongestAnswer == null || a.getScore() > strongestAnswer.getScore()) strongestAnswer = a;
             if (weakestAnswer == null || a.getScore() < weakestAnswer.getScore()) weakestAnswer = a;
@@ -240,6 +268,7 @@ public class AssessmentService {
         result.setOverallScore((short) overall);
         result.setBand(bandFor(overall));
         result.setDomainScores(domainScores);
+        result.setDomainMax(domainMax);
         result.setTimedOut(timedOut);
         if (strongestAnswer != null) result.setStrongestPrinciple(questionsById.get(strongestAnswer.getQuestionId()).getPrincipleCode());
         if (weakestAnswer != null) result.setWeakestPrinciple(questionsById.get(weakestAnswer.getQuestionId()).getPrincipleCode());
@@ -277,6 +306,35 @@ public class AssessmentService {
             int j = secureRandom.nextInt(i + 1);
             Collections.swap(ids, i, j);
         }
+    }
+
+    /** Canonical domain for each of the 50 principles, resolved by majority vote
+     *  across that principle's own question variants — see the comment at its call
+     *  site in submit() for why a per-answer q.getDomain() read isn't safe. */
+    private Map<String, String> principleDomains() {
+        Map<String, Map<String, Long>> votes = new HashMap<>();
+        for (LeaderQuestionBank q : questionBankRepo.findAll()) {
+            votes.computeIfAbsent(q.getPrincipleCode(), k -> new HashMap<>())
+                    .merge(q.getDomain(), 1L, Long::sum);
+        }
+        Map<String, String> out = new HashMap<>();
+        for (Map.Entry<String, Map<String, Long>> e : votes.entrySet()) {
+            e.getValue().entrySet().stream()
+                    .max(Map.Entry.comparingByValue())
+                    .ifPresent(top -> out.put(e.getKey(), top.getKey()));
+        }
+        return out;
+    }
+
+    /** Achievable max per domain — purely a function of the question bank's
+     *  principle→domain resolution, never of which questions one taker happened to
+     *  get, so it's identical for every attempt past or future. */
+    private Map<String, Integer> domainMaxFor(Map<String, String> principleDomains) {
+        Map<String, Integer> domainMax = new LinkedHashMap<>();
+        for (String d : List.of("I", "II", "III", "IV", "V")) domainMax.put(d, 0);
+        for (String d : principleDomains.values())
+            domainMax.merge(d, MAX_SCORE_PER_QUESTION, Integer::sum);
+        return domainMax;
     }
 
     private LeaderBand bandFor(int overall) {
@@ -324,6 +382,10 @@ public class AssessmentService {
         dto.setBand(r.getBand().name());
         dto.setTimedOut(r.isTimedOut());
         dto.setDomainScores(r.getDomainScores());
+        // domainMax wasn't persisted on results scored before this field existed —
+        // but it depends only on the question bank, never on the specific attempt,
+        // so it's safe (and correct) to compute it live for those rows too.
+        dto.setDomainMax(r.getDomainMax() != null ? r.getDomainMax() : domainMaxFor(principleDomains()));
         dto.setStrongestPrinciple(r.getStrongestPrinciple());
         dto.setWeakestPrinciple(r.getWeakestPrinciple());
         dto.setCreatedAt(r.getCreatedAt());

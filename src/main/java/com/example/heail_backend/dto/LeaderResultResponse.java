@@ -18,6 +18,9 @@ public class LeaderResultResponse {
     boolean timedOut;
     String band;
     Map<String, Integer> domainScores;
+    /** Null for results scored before this field existed — the frontend falls back
+     *  to 50 per domain in that case. */
+    Map<String, Integer> domainMax;
     String strongestPrinciple;
     String strongestPrincipleText;
     String weakestPrinciple;

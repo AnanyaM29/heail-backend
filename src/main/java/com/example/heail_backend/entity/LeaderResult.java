@@ -42,6 +42,13 @@ public class LeaderResult {
     @Column(name = "domain_scores", nullable = false, columnDefinition = "jsonb")
     Map<String, Integer> domainScores;
 
+    /** Actual achievable max per domain (principles resolved to that domain × 5) —
+     *  not a fixed 50, since the 50 principles aren't guaranteed to split evenly
+     *  5 ways. Null on results scored before this field existed. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "domain_max", columnDefinition = "jsonb")
+    Map<String, Integer> domainMax;
+
     @Column(name = "strongest_principle", length = 3)
     String strongestPrinciple;
 

@@ -309,7 +309,10 @@ public class HrAssessmentService {
         answer.setScore(score);
         answerRepo.save(answer);
 
-        int answeredCount = answerRepo.findBySessionId(sessionId).size();
+        // Distinct: see the duplicate-row race noted in submit() — the same possible
+        // double-insert would otherwise show an inflated answered count mid-test.
+        int answeredCount = (int) answerRepo.findBySessionId(sessionId).stream()
+                .map(Answer::getQuestionId).distinct().count();
 
         AnswerResponse res = new AnswerResponse();
         res.setQuestionId(req.getQuestionId());
@@ -327,7 +330,15 @@ public class HrAssessmentService {
         if (session.getStatus() != SessionStatus.IN_PROGRESS)
             throw new IllegalStateException("This assessment has already been submitted");
 
-        List<Answer> answers = answerRepo.findBySessionId(sessionId);
+        // answer()'s upsert (find-by-session-and-question, then insert-or-update) has no
+        // DB-level uniqueness backing it — two autosave calls for the same question landing
+        // close together can each miss the other's not-yet-committed row and both insert,
+        // leaving two Answer rows for one question. Collapsing to the most recently answered
+        // row per question makes scoring correct regardless of whether that race fires.
+        List<Answer> answers = answerRepo.findBySessionId(sessionId).stream()
+                .collect(Collectors.toMap(Answer::getQuestionId, a -> a,
+                        (a, b) -> a.getAnsweredAt().isAfter(b.getAnsweredAt()) ? a : b))
+                .values().stream().toList();
         // Measure completion against the questions the player could actually answer, not
         // the raw session list — a stale id the bank no longer has is never rendered, so
         // it must not block submission (that would strand the respondent with no fix).
